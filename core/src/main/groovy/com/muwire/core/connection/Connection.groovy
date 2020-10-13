@@ -49,6 +49,8 @@ abstract class Connection implements Closeable {
     protected final String name
 
     long lastPingSentTime, lastPongReceivedTime
+    
+    private volatile UUID lastPingUUID
 
     Connection(EventBus eventBus, Endpoint endpoint, boolean incoming,
         HostCache hostCache, TrustService trustService, MuWireSettings settings) {
@@ -132,6 +134,8 @@ abstract class Connection implements Closeable {
         def ping = [:]
         ping.type = "Ping"
         ping.version = 1
+        lastPingUUID = UUID.randomUUID()
+        ping.uuid = lastPingUUID.toString()
         messages.put(ping)
         lastPingSentTime = System.currentTimeMillis()
     }
@@ -160,12 +164,14 @@ abstract class Connection implements Closeable {
         messages.put(query)
     }
 
-    protected void handlePing() {
+    protected void handlePing(def ping) {
         log.fine("$name received ping")
         def pong = [:]
         pong.type = "Pong"
         pong.version = 1
-        pong.pongs = hostCache.getGoodHosts(10).collect { d -> d.toBase64() }
+        if (ping.uuid != null)
+            pong.uuid = ping.uuid
+        pong.pongs = hostCache.getGoodHosts(2).collect { d -> d.toBase64() }
         messages.put(pong)
     }
 
@@ -174,7 +180,23 @@ abstract class Connection implements Closeable {
         lastPongReceivedTime = System.currentTimeMillis()
         if (pong.pongs == null)
             throw new Exception("Pong doesn't have pongs")
-        pong.pongs.each {
+            
+        if (lastPingUUID == null) {
+            log.fine "$name received an unexpected pong"
+            return
+        }
+        if (pong.uuid == null) {
+            log.fine "$name pong doesn't have uuid"
+            return
+        }
+        UUID pongUUID = UUID.fromString(pong.uuid)
+        if (pongUUID != lastPingUUID) {
+            log.fine "$name ping/pong uuid mismatch"
+            return
+        }
+        lastPingUUID = null
+        
+        pong.pongs.stream().limit(2).forEach {
             def dest = new Destination(it)
             eventBus.publish(new HostDiscoveredEvent(destination: dest))
         }

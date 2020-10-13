@@ -23,8 +23,10 @@ import com.muwire.core.connection.I2PAcceptor
 import com.muwire.core.connection.I2PConnector
 import com.muwire.core.connection.LeafConnectionManager
 import com.muwire.core.connection.UltrapeerConnectionManager
+import com.muwire.core.download.DownloadHopelessEvent
 import com.muwire.core.download.DownloadManager
 import com.muwire.core.download.SourceDiscoveredEvent
+import com.muwire.core.download.SourceVerifiedEvent
 import com.muwire.core.download.UIDownloadCancelledEvent
 import com.muwire.core.download.UIDownloadEvent
 import com.muwire.core.download.UIDownloadPausedEvent
@@ -70,6 +72,7 @@ import com.muwire.core.hostcache.HostDiscoveredEvent
 import com.muwire.core.mesh.MeshManager
 import com.muwire.core.search.BrowseManager
 import com.muwire.core.search.QueryEvent
+import com.muwire.core.search.ResponderCache
 import com.muwire.core.search.ResultsEvent
 import com.muwire.core.search.ResultsSender
 import com.muwire.core.search.SearchEvent
@@ -169,6 +172,8 @@ public class Core {
                 i2pOptions["inbound.nickname"] = "MuWire"
             if (!i2pOptions.containsKey("outbound.nickname"))
                 i2pOptions["outbound.nickname"] = "MuWire"
+            if (!i2pOptions.containsKey("router.excludePeerCaps"))
+                i2pOptions["router.excludePeerCaps"] = "KLMNO"
         }
         if (!(i2pOptions.containsKey("i2np.ntcp.port")
                 && i2pOptions.containsKey("i2np.udp.port")
@@ -195,7 +200,7 @@ public class Core {
             routerProps.setProperty("i2p.dir.base", home.getAbsolutePath())
             routerProps.setProperty("i2p.dir.config", home.getAbsolutePath())
             routerProps.setProperty("geoip.dir", home.getAbsolutePath() + File.separator + "geoip")
-            routerProps.setProperty("router.excludePeerCaps", "KLM")
+            routerProps.setProperty("router.excludePeerCaps", i2pOptions["router.excludePeerCaps"])
             routerProps.setProperty("i2np.inboundKBytesPerSecond", String.valueOf(props.inBw))
             routerProps.setProperty("i2np.outboundKBytesPerSecond", String.valueOf(props.outBw))
             routerProps.setProperty("i2cp.disableInterface", "true")
@@ -284,6 +289,7 @@ public class Core {
         log.info("initializing mesh manager")
         MeshManager meshManager = new MeshManager(fileManager, home, props)
         eventBus.register(SourceDiscoveredEvent.class, meshManager)
+        eventBus.register(SourceVerifiedEvent.class, meshManager)
 
         log.info "initializing persistence service"
         persisterService = new PersisterService(new File(home, "files.json"), eventBus, 60000, fileManager)
@@ -306,10 +312,17 @@ public class Core {
         eventBus.register(HostDiscoveredEvent.class, hostCache)
         eventBus.register(ConnectionEvent.class, hostCache)
 
+        
+        log.info("initializing responder cache")
+        ResponderCache responderCache = new ResponderCache(props.responderCacheSize)
+        eventBus.register(UIResultBatchEvent.class, responderCache)
+        eventBus.register(SourceVerifiedEvent.class, responderCache)
+        
+        
         log.info("initializing connection manager")
         connectionManager = props.isLeaf() ?
             new LeafConnectionManager(eventBus, me, 3, hostCache, props) :
-            new UltrapeerConnectionManager(eventBus, me, 512, 512, hostCache, trustService, props)
+            new UltrapeerConnectionManager(eventBus, me, props.peerConnections, props.leafConnections, hostCache, responderCache, trustService, props)
         eventBus.register(TrustEvent.class, connectionManager)
         eventBus.register(ConnectionEvent.class, connectionManager)
         eventBus.register(DisconnectionEvent.class, connectionManager)
@@ -318,13 +331,13 @@ public class Core {
         log.info("initializing cache client")
         cacheClient = new CacheClient(eventBus,hostCache, connectionManager, i2pSession, props, 10000)
 
-        if (!props.plugin) {
+        if (!(props.plugin || props.disableUpdates)) {
         log.info("initializing update client")
             updateClient = new UpdateClient(eventBus, i2pSession, myVersion, props, fileManager, me, spk)
             eventBus.register(FileDownloadedEvent.class, updateClient)
             eventBus.register(UIResultBatchEvent.class, updateClient)
         } else
-            log.info("running as plugin, not initializing update client")
+            log.info("running as plugin or updates disabled, not initializing update client")
 
         log.info("initializing connector")
         I2PConnector i2pConnector = new I2PConnector(i2pSocketManager)
@@ -362,8 +375,17 @@ public class Core {
         eventBus.register(QueryEvent.class, searchManager)
         eventBus.register(ResultsEvent.class, searchManager)
 
+        log.info("initializing chat manager")
+        chatManager = new ChatManager(eventBus, me, i2pConnector, trustService, props)
+        eventBus.with { 
+            register(UIConnectChatEvent.class, chatManager)
+            register(UIDisconnectChatEvent.class, chatManager)
+            register(ChatMessageEvent.class, chatManager)
+            register(ChatDisconnectionEvent.class, chatManager)
+        }
+        
         log.info("initializing download manager")
-        downloadManager = new DownloadManager(eventBus, trustService, meshManager, props, i2pConnector, home, me)
+        downloadManager = new DownloadManager(eventBus, trustService, meshManager, props, i2pConnector, home, me, chatServer)
         eventBus.register(UIDownloadEvent.class, downloadManager)
         eventBus.register(UIDownloadFeedItemEvent.class, downloadManager)
         eventBus.register(UILoadedEvent.class, downloadManager)
@@ -372,6 +394,7 @@ public class Core {
         eventBus.register(SourceDiscoveredEvent.class, downloadManager)
         eventBus.register(UIDownloadPausedEvent.class, downloadManager)
         eventBus.register(UIDownloadResumedEvent.class, downloadManager)
+        eventBus.register(DownloadHopelessEvent.class, downloadManager)
 
         log.info("initializing upload manager")
         uploadManager = new UploadManager(eventBus, fileManager, meshManager, downloadManager, persisterFolderService, props)
@@ -382,16 +405,6 @@ public class Core {
         log.info("initializing connection establisher")
         connectionEstablisher = new ConnectionEstablisher(eventBus, i2pConnector, props, connectionManager, hostCache)
 
-        
-        log.info("initializing chat manager")
-        chatManager = new ChatManager(eventBus, me, i2pConnector, trustService, props)
-        eventBus.with { 
-            register(UIConnectChatEvent.class, chatManager)
-            register(UIDisconnectChatEvent.class, chatManager)
-            register(ChatMessageEvent.class, chatManager)
-            register(ChatDisconnectionEvent.class, chatManager)
-        }
-        
         log.info("initializing acceptor")
         I2PAcceptor i2pAcceptor = new I2PAcceptor(i2pSocketManager)
         connectionAcceptor = new ConnectionAcceptor(eventBus, connectionManager, props,
@@ -550,7 +563,7 @@ public class Core {
             }
         }
 
-        Core core = new Core(props, home, "0.7.1")
+        Core core = new Core(props, home, "0.7.6")
         core.startServices()
 
         // ... at the end, sleep or execute script

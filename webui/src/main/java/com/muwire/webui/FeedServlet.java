@@ -219,7 +219,7 @@ public class FeedServlet extends HttpServlet {
             }
             boolean autoDownload = Boolean.valueOf(req.getParameter("autoDownload"));
             boolean sequential = Boolean.valueOf(req.getParameter("sequential"));
-            int updateInterval = Integer.valueOf(req.getParameter("updateInterval")) * 60000;
+            long updateInterval = Long.valueOf(req.getParameter("updateInterval")) * 60000;
             int itemsToKeep = Integer.valueOf(req.getParameter("itemsToKeep"));
             
             feedManager.configure(host, autoDownload, sequential, updateInterval, itemsToKeep);
@@ -312,6 +312,7 @@ public class FeedServlet extends HttpServlet {
             sb.append("<Item>");
             sb.append("<Name>").append(Util.escapeHTMLinXML(feedItem.getName())).append("</Name>");
             sb.append("<ResultStatus>").append(resultStatus).append("</ResultStatus>");
+            sb.append("<ResultStatusString>").append(Util._t(EnumStrings.RESULT_STATES.get(resultStatus))).append("</ResultStatusString>");
             sb.append("<Size>").append(DataHelper.formatSize2Decimal(feedItem.getSize(), false) + "B").append("</Size>");
             sb.append("<Timestamp>").append(DataHelper.formatTime(feedItem.getTimestamp())).append("</Timestamp>");
             sb.append("<InfoHash>").append(Base64.encode(feedItem.getInfoHash().getRoot())).append("</InfoHash>");
@@ -339,6 +340,7 @@ public class FeedServlet extends HttpServlet {
             sb.append("<Files>").append(files).append("</Files>");
             sb.append("<Revision>").append(revision).append("</Revision>");
             sb.append("<Status>").append(feed.getStatus().toString()).append("</Status>");
+            sb.append("<StatusString>").append(Util._t(EnumStrings.FEED_STATES.get(feed.getStatus()))).append("</StatusString>");
             sb.append("<Active>").append(feed.getStatus().isActive()).append("</Active>");
             sb.append("<LastUpdated>").append(DataHelper.formatTime(feed.getLastUpdated())).append("</LastUpdated>");
             sb.append("<UpdateInterval>").append(feed.getUpdateInterval() / 60000).append("</UpdateInterval>");

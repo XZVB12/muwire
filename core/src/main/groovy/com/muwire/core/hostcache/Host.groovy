@@ -7,17 +7,19 @@ class Host {
     private static final int MAX_FAILURES = 3
 
     final Destination destination
-    private final int clearInterval, hopelessInterval, rejectionInterval
+    private final int clearInterval, hopelessInterval, rejectionInterval, purgeInterval
     int failures,successes
     long lastAttempt
     long lastSuccessfulAttempt
     long lastRejection
 
-    public Host(Destination destination, int clearInterval, int hopelessInterval, int rejectionInterval) {
+    public Host(Destination destination, int clearInterval, int hopelessInterval, int rejectionInterval,
+        int purgeInterval) {
         this.destination = destination
         this.clearInterval = clearInterval
         this.hopelessInterval = hopelessInterval
         this.rejectionInterval = rejectionInterval
+        this.purgeInterval = purgeInterval
     }
     
     private void connectSuccessful() {
@@ -54,17 +56,22 @@ class Host {
         failures = 0
     }
 
-    synchronized boolean canTryAgain() {
+    synchronized boolean canTryAgain(final long now) {
         lastSuccessfulAttempt > 0 && 
-            System.currentTimeMillis() - lastAttempt > (clearInterval * 60 * 1000)
+            now - lastAttempt > (clearInterval * 60 * 1000)
     }
     
-    synchronized boolean isHopeless() {
+    synchronized boolean isHopeless(final long now) {
         isFailed() && 
-            System.currentTimeMillis() - lastSuccessfulAttempt > (hopelessInterval * 60 * 1000)
+            now - lastSuccessfulAttempt > (hopelessInterval * 60 * 1000)
     }
     
-    synchronized boolean isRecentlyRejected() {
-        System.currentTimeMillis() - lastRejection < (rejectionInterval * 60 * 1000)
+    synchronized boolean isRecentlyRejected(final long now) {
+        now - lastRejection < (rejectionInterval * 60 * 1000)
+    }
+    
+    synchronized boolean shouldBeForgotten(final long now) {
+        isHopeless(now) &&
+            now - lastAttempt > (purgeInterval * 60 * 1000)
     }
 }

@@ -1,6 +1,7 @@
 package com.muwire.gui
 
 import griffon.core.GriffonApplication
+import static com.muwire.gui.Translator.trans
 import griffon.core.artifact.GriffonView
 import griffon.inject.MVCMember
 import griffon.metadata.ArtifactProviderFor
@@ -19,8 +20,9 @@ class ShutdownWindowView {
     
     void initUI() {
         builder.with {
-            app = application(size: [320, 80], id: 'shutdown-window',
+            application(size: [320, 80], id: 'shutdown-window',
                     locationRelativeTo : null,
+                    pack: true,
                     title: application.configuration['application.title'],
                     iconImage:   imageIcon('/MuWire-48x48.png').image,
                     iconImages: [imageIcon('/MuWire-48x48.png').image,
@@ -29,7 +31,7 @@ class ShutdownWindowView {
                     visible: false ) {
                 panel {
                     vbox {
-                        label("MuWire is shutting down, please wait...")
+                        label(trans("MUWIRE_IS_CLOSING"))
                         Box.createVerticalGlue()
                         progressBar(indeterminate : true)
                     }

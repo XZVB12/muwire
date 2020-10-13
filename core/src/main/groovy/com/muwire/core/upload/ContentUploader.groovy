@@ -69,9 +69,9 @@ class ContentUploader extends Uploader {
                     int start = mapped.position()
                     mapped.get(tmp, 0, Math.min(tmp.length, mapped.remaining()))
                     read = mapped.position() - start
-                    dataSinceLastRead += read
                 }
                 endpoint.getOutputStream().write(tmp, 0, read)
+                dataSinceLastRead.addAndGet(read)
             }
             done = true
         } finally {
@@ -136,5 +136,25 @@ class ContentUploader extends Uploader {
         ContentUploader other = (ContentUploader)o
         request.infoHash == other.request.infoHash &&
             request.getDownloader() == other.request.getDownloader()
+    }
+
+    @Override
+    public boolean isBrowseEnabled() {
+        request.browse
+    }
+
+    @Override
+    public boolean isFeedEnabled() {
+        request.feed
+    }
+
+    @Override
+    public boolean isChatEnabled() {
+        request.chat
+    }
+
+    @Override
+    public Persona getDownloaderPersona() {
+        request.downloader
     }
 }

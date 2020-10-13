@@ -1,20 +1,29 @@
 package com.muwire.gui
 
 import griffon.core.artifact.GriffonView
+import static com.muwire.gui.Translator.trans
 import griffon.inject.MVCMember
 import griffon.metadata.ArtifactProviderFor
+import net.i2p.data.DataHelper
 
 import javax.swing.JMenuItem
 import javax.swing.JPopupMenu
 import javax.swing.JSplitPane
+import javax.swing.JTextPane
 import javax.swing.ListSelectionModel
 import javax.swing.SwingConstants
+import javax.swing.text.Element
+import javax.swing.text.Style
+import javax.swing.text.StyleConstants
+import javax.swing.text.StyleContext
+import javax.swing.text.StyledDocument
 import javax.swing.SpringLayout.Constraints
 
 import com.muwire.core.Persona
 import com.muwire.core.chat.ChatConnectionAttemptStatus
 
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 
@@ -34,7 +43,7 @@ class ChatRoomView {
     def pane
     def parent
     def sayField
-    def roomTextArea
+    JTextPane roomTextArea
     def textScrollPane
     def membersTable
     def lastMembersTableSortEvent
@@ -48,14 +57,13 @@ class ChatRoomView {
                 panel(constraints : BorderLayout.CENTER) {
                     gridLayout(rows : 1, cols : 1)
                     textScrollPane = scrollPane {
-                        roomTextArea = textArea(editable : false, lineWrap : true, wrapStyleWord : true)
+                        roomTextArea = textPane(editable : false)
                     }
                 }
                 panel(constraints : BorderLayout.SOUTH) {
                     borderLayout()
-                    label(text : "Say something here: ", constraints : BorderLayout.WEST)
+                    label(text : trans("SAY_SOMETHING_HERE") + ": ", constraints : BorderLayout.WEST)
                     sayField = textField(enabled : bind {parentModel.sayActionEnabled}, actionPerformed : {controller.say()}, constraints : BorderLayout.CENTER)
-                    button(enabled : bind {parentModel.sayActionEnabled},text : "Say", constraints : BorderLayout.EAST, sayAction)
                 }
             }
         } else {
@@ -69,8 +77,8 @@ class ChatRoomView {
                             scrollPane {
                                 membersTable = table(autoCreateRowSorter : true, rowHeight : rowHeight) {
                                     tableModel(list : model.members) {
-                                        closureColumn(header : "Name", preferredWidth: 100, type: String, read : {it.getHumanReadableName()})
-                                        closureColumn(header : "Trust Status", preferredWidth: 30, type : String, read : {String.valueOf(model.core.trustService.getLevel(it.destination))})
+                                        closureColumn(header : trans("NAME"), preferredWidth: 100, type: String, read : {it.getHumanReadableName()})
+                                        closureColumn(header : trans("TRUST_STATUS"), preferredWidth: 30, type : String, read : {trans(model.core.trustService.getLevel(it.destination).name())})
                                     }
                                 }
                             }
@@ -78,16 +86,15 @@ class ChatRoomView {
                         panel {
                             gridLayout(rows : 1, cols : 1)
                             textScrollPane = scrollPane {
-                                roomTextArea = textArea(editable : false, lineWrap : true, wrapStyleWord : true)
+                                roomTextArea = textPane(editable : false)
                             }
                         }
                     }
                 }
                 panel(constraints : BorderLayout.SOUTH) {
                     borderLayout()
-                    label(text : "Say something here: ", constraints : BorderLayout.WEST)
+                    label(text : trans("SAY_SOMETHING_HERE") + ": ", constraints : BorderLayout.WEST)
                     sayField = textField(enabled : bind {parentModel.sayActionEnabled}, actionPerformed : {controller.say()}, constraints : BorderLayout.CENTER)
-                    button(enabled : bind {parentModel.sayActionEnabled}, text : "Say", constraints : BorderLayout.EAST, sayAction)
                 }
 
             }
@@ -135,23 +142,32 @@ class ChatRoomView {
                         }
                     })
         }
+        
+        // styles
+        StyledDocument document = roomTextArea.getStyledDocument()
+        Style regular = StyleContext.getDefaultStyleContext().getStyle(StyleContext.DEFAULT_STYLE)
+        Style italic = document.addStyle("italic", regular)
+        StyleConstants.setItalic(italic, true)
+        Style gray = document.addStyle("gray", regular)
+        StyleConstants.setForeground(gray, Color.GRAY)
+          
     }
     
     private void showPopupMenu(MouseEvent e) {
         JPopupMenu menu = new JPopupMenu()
-        JMenuItem privateChat = new JMenuItem("Start Private Chat")
+        JMenuItem privateChat = new JMenuItem(trans("START_PRIVATE_CHAT"))
         privateChat.addActionListener({controller.privateMessage()})
         menu.add(privateChat)
-        JMenuItem browse = new JMenuItem("Browse")
+        JMenuItem browse = new JMenuItem(trans("BROWSE"))
         browse.addActionListener({controller.browse()})
         menu.add(browse)
-        JMenuItem markTrusted = new JMenuItem("Mark Trusted")
+        JMenuItem markTrusted = new JMenuItem(trans("MARK_TRUSTED"))
         markTrusted.addActionListener({controller.markTrusted()})
         menu.add(markTrusted)
-        JMenuItem markNeutral = new JMenuItem("Mark Neutral")
+        JMenuItem markNeutral = new JMenuItem(trans("MARK_NEUTRAL"))
         markNeutral.addActionListener({controller.markNeutral()})
         menu.add(markNeutral)
-        JMenuItem markDistrusted = new JMenuItem("Mark Distrusted")
+        JMenuItem markDistrusted = new JMenuItem(trans("MARK_DISTRUSTED"))
         markDistrusted.addActionListener({controller.markDistrusted()})
         menu.add(markDistrusted)
         menu.show(e.getComponent(), e.getX(), e.getY())
@@ -178,5 +194,29 @@ class ChatRoomView {
         controller.leaveRoom()
         chatNotificator.roomClosed(mvcGroup.mvcId)
         mvcGroup.destroy()
+    }
+    
+    void appendGray(String gray) {
+        StyledDocument doc = roomTextArea.getStyledDocument()
+        doc.insertString(doc.getEndPosition().getOffset() - 1, gray, doc.getStyle("gray"))
+    }
+    
+    void appendSay(String text, Persona sender, long timestamp) {
+        StyledDocument doc = roomTextArea.getStyledDocument()
+        String header = DataHelper.formatTime(timestamp) + " <" + sender.getHumanReadableName() + "> "
+        doc.insertString(doc.getEndPosition().getOffset() - 1, header, doc.getStyle("italic"))
+        doc.insertString(doc.getEndPosition().getOffset() - 1, text, doc.getStyle("regular"))
+        doc.insertString(doc.getEndPosition().getOffset() - 1, "\n", doc.getStyle("regular"))
+    }
+    
+    int getLineCount() {
+        StyledDocument doc = roomTextArea.getStyledDocument()
+        doc.getDefaultRootElement().getElementCount() - 1
+    }
+    
+    void removeFirstLine() {
+        StyledDocument doc = roomTextArea.getStyledDocument()
+        Element element = doc.getParagraphElement(0)
+        doc.remove(0, element.getEndOffset())
     }
 }

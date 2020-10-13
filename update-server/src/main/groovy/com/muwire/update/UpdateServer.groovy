@@ -54,7 +54,8 @@ class UpdateServer {
         session.addMuxedSessionListener(new Listener(update), I2PSession.PROTO_DATAGRAM, I2PSession.PORT_ANY)
         session.connect()
         log.info("Connected, going to sleep")
-        Thread.sleep(Integer.MAX_VALUE)
+        while(true)
+            Thread.sleep(Integer.MAX_VALUE)
 
     }
 
@@ -99,7 +100,7 @@ class UpdateServer {
 
         @Override
         public void disconnected(I2PSession session) {
-            Log.severe("Disconnected from I2P router")
+            log.severe("Disconnected from I2P router")
             System.exit(1)
         }
 

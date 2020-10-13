@@ -8,6 +8,7 @@ import com.muwire.core.MuWireSettings
 import com.muwire.core.Persona
 import com.muwire.core.hostcache.HostCache
 import com.muwire.core.search.QueryEvent
+import com.muwire.core.search.ResponderCache
 import com.muwire.core.trust.TrustService
 
 import groovy.util.logging.Log
@@ -18,18 +19,22 @@ class UltrapeerConnectionManager extends ConnectionManager {
 
     final int maxPeers, maxLeafs
     final TrustService trustService
+    final ResponderCache responderCache
 
     final Map<Destination, PeerConnection> peerConnections = new ConcurrentHashMap()
     final Map<Destination, LeafConnection> leafConnections = new ConcurrentHashMap()
+    
+    private final Random random = new Random()
 
     UltrapeerConnectionManager() {}
 
     public UltrapeerConnectionManager(EventBus eventBus, Persona me, int maxPeers, int maxLeafs,
-        HostCache hostCache, TrustService trustService, MuWireSettings settings) {
+        HostCache hostCache, ResponderCache responderCache, TrustService trustService, MuWireSettings settings) {
         super(eventBus, me, hostCache, settings)
         this.maxPeers = maxPeers
         this.maxLeafs = maxLeafs
         this.trustService = trustService
+        this.responderCache = responderCache
     }
     @Override
     public void drop(Destination d) {
@@ -44,8 +49,18 @@ class UltrapeerConnectionManager extends ConnectionManager {
         if (e.replyTo != me.destination && e.receivedOn != me.destination &&
             !leafConnections.containsKey(e.receivedOn))
             e.firstHop = false
+        final int connCount = peerConnections.size()
+        if (connCount == 0)
+            return
+        final int treshold = (int)(Math.sqrt(connCount)) + 1
         peerConnections.values().each {
-            if (e.getReceivedOn() != it.getEndpoint().getDestination())
+            // 1. do not send query back to originator
+            // 2. if firstHop forward to everyone
+            // 3. otherwise to everyone who has recently responded/transferred to us + randomized sqrt of neighbors
+            if (e.getReceivedOn() != it.getEndpoint().getDestination() &&
+                (e.firstHop || 
+                    responderCache.hasResponded(it.endpoint.destination) ||
+                    random.nextInt(connCount) < treshold))
                 it.sendQuery(e)
         }
     }

@@ -104,8 +104,10 @@ public class DownloadServlet extends HttpServlet {
                 sb.append("<Details>");
                 sb.append("<Path>").append(Util.escapeHTMLinXML(downloader.getFile().getAbsolutePath())).append("</Path>");
                 sb.append("<PieceSize>").append(downloader.getPieceSize()).append("</PieceSize>");
+                sb.append("<Sequential>").append(downloader.isSequential()).append("</Sequential>");
                 sb.append("<KnownSources>").append(downloader.getTotalWorkers()).append("</KnownSources>");
                 sb.append("<ActiveSources>").append(downloader.activeWorkers()).append("</ActiveSources>");
+                sb.append("<HopelessSources>").append(downloader.countHopelessSources()).append("</HopelessSources>");
                 sb.append("<TotalPieces>").append(downloader.getNPieces()).append("</TotalPieces>");
                 sb.append("<DonePieces>").append(downloader.donePieces()).append("</DonePieces>");
                 sb.append("</Details>");
@@ -215,6 +217,7 @@ public class DownloadServlet extends HttpServlet {
             sb.append("<InfoHash>").append(Base64.encode(infoHash.getRoot())).append("</InfoHash>");
             sb.append("<Name>").append(Util.escapeHTMLinXML(name)).append("</Name>");
             sb.append("<State>").append(state.toString()).append("</State>");
+            sb.append("<StateString>").append(Util._t(EnumStrings.DOWNLOAD_STATES.get(state))).append("</StateString>");
             sb.append("<Speed>").append(DataHelper.formatSize2Decimal(speed, false)).append("B/sec").append("</Speed>");
             String ETAString;
             if (ETA == Long.MAX_VALUE)

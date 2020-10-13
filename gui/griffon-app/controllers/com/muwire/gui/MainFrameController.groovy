@@ -1,5 +1,5 @@
 package com.muwire.gui
-
+import static com.muwire.gui.Translator.trans
 import griffon.core.GriffonApplication
 import griffon.core.artifact.GriffonController
 import griffon.core.controller.ControllerAction
@@ -33,6 +33,7 @@ import com.muwire.core.filecert.UICreateCertificateEvent
 import com.muwire.core.filefeeds.Feed
 import com.muwire.core.filefeeds.FeedItem
 import com.muwire.core.filefeeds.UIDownloadFeedItemEvent
+import com.muwire.core.filefeeds.UIFeedConfigurationEvent
 import com.muwire.core.filefeeds.UIFeedDeletedEvent
 import com.muwire.core.filefeeds.UIFeedUpdateEvent
 import com.muwire.core.filefeeds.UIFilePublishedEvent
@@ -61,13 +62,6 @@ class MainFrameController {
 
     private volatile Core core
 
-    @ControllerAction
-    void clearSearch() {
-        def searchField = builder.getVariable("search-field")
-        searchField.setSelectedItem(null)
-        searchField.requestFocus()
-    }
-    
     @ControllerAction
     void search(ActionEvent evt) {
         if (evt?.getActionCommand() == null)
@@ -181,7 +175,7 @@ class MainFrameController {
         int selected = builder.getVariable("searches-table").getSelectedRow()
         if (selected < 0)
             return
-        String reason = JOptionPane.showInputDialog("Enter reason (optional)")
+        String reason = JOptionPane.showInputDialog(trans("ENTER_REASON_OPTIONAL"))
         Persona p = model.searches[selected].originator
         core.eventBus.publish( new TrustEvent(persona : p, level : TrustLevel.TRUSTED, reason : reason) )
     }
@@ -191,7 +185,7 @@ class MainFrameController {
         int selected = builder.getVariable("searches-table").getSelectedRow()
         if (selected < 0)
             return
-        String reason = JOptionPane.showInputDialog("Enter reason (optional)")
+        String reason = JOptionPane.showInputDialog(trans("ENTER_REASON_OPTIONAL"))
         Persona p = model.searches[selected].originator
         core.eventBus.publish( new TrustEvent(persona : p, level : TrustLevel.DISTRUSTED, reason : reason) )
     }
@@ -228,17 +222,13 @@ class MainFrameController {
 
     @ControllerAction
     void clear() {
-        def toRemove = []
-        model.downloads.each {
-             if (it.downloader.getCurrentState() == Downloader.DownloadState.CANCELLED) {
-                 toRemove << it
-             } else if (it.downloader.getCurrentState() == Downloader.DownloadState.FINISHED) {
-                 toRemove << it
-             }
-         }
-         toRemove.each {
-             model.downloads.remove(it)
-         }
+        model.downloads.removeAll { 
+            def state = it.downloader.getCurrentState()
+            state == Downloader.DownloadState.CANCELLED ||
+                state == Downloader.DownloadState.FINISHED ||
+                state == Downloader.DownloadState.HOPELESS
+        }
+        
          model.clearButtonEnabled = false
 
     }
@@ -249,7 +239,7 @@ class MainFrameController {
             return
         String reason = null
         if (level != TrustLevel.NEUTRAL)
-            reason = JOptionPane.showInputDialog("Enter reason (optional)")
+            reason = JOptionPane.showInputDialog(trans("ENTER_REASON_OPTIONAL"))
         builder.getVariable(tableName).model.fireTableDataChanged()
         core.eventBus.publish(new TrustEvent(persona : list[row].persona, level : level, reason : reason))
     }
@@ -363,6 +353,47 @@ class MainFrameController {
         startChat(p)
         view.showChatWindow.call()
     }
+    
+    @ControllerAction
+    void browseFromUpload() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        Persona p = u.getDownloaderPersona()
+
+        String groupId = p.getHumanReadableName() + "-browse"
+        def params = [:]
+        params['host'] = p
+        params['core'] = model.core
+        mvcGroup.createMVCGroup("browse",groupId,params)
+    }
+    
+    @ControllerAction
+    void subscribeFromUpload() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        Persona p = u.getDownloaderPersona()
+        
+        Feed feed = new Feed(p)
+        feed.setAutoDownload(core.muOptions.defaultFeedAutoDownload)
+        feed.setSequential(core.muOptions.defaultFeedSequential)
+        feed.setItemsToKeep(core.muOptions.defaultFeedItemsToKeep)
+        feed.setUpdateInterval(core.muOptions.defaultFeedUpdateInterval)
+        
+        core.eventBus.publish(new UIFeedConfigurationEvent(feed : feed, newFeed : true))
+        view.showFeedsWindow.call()
+    }
+    
+    @ControllerAction
+    void chatFromUpload() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        Persona p = u.getDownloaderPersona()
+        startChat(p)
+        view.showChatWindow.call()
+    }
 
     void unshareSelectedFile() {
         def sf = view.selectedSharedFiles()
@@ -428,10 +459,15 @@ class MainFrameController {
             params['home'] = core.home
             mvcGroup.createMVCGroup("certificate-warning", params)
         } else {
+            int count = 0
             view.selectedSharedFiles().each {
+                count++
                 core.eventBus.publish(new UICreateCertificateEvent(sharedFile : it))
             }
-            JOptionPane.showMessageDialog(null, "Certificate(s) have been issued")
+            if (count > 1)
+                JOptionPane.showMessageDialog(null, trans("CERTIFICATES_ISSUED"))
+            else if (count == 1)
+                JOptionPane.showMessageDialog(null, trans("CERTIFICATE_ISSUED"))
         }
     }
     
@@ -439,7 +475,7 @@ class MainFrameController {
     void showFileDetails() {
         def selected = view.selectedSharedFiles()
         if (selected == null || selected.size() != 1) {
-            JOptionPane.showMessageDialog(null, "Please select only one file to view it's details")
+            JOptionPane.showMessageDialog(null, trans("PLEASE_SELECT_ONE_FILE_DETAILS"))
             return
         }
         def params = [:]
@@ -452,7 +488,7 @@ class MainFrameController {
     void openContainingFolder() {
         def selected = view.selectedSharedFiles()
         if (selected == null || selected.size() != 1) {
-            JOptionPane.showMessageDialog(null, "Please select only one file to open it's containing folder")
+            JOptionPane.showMessageDialog(null, trans("PLEASE_SELECT_ONE_FILE_FOLDER"))
             return
         }
         
@@ -483,14 +519,14 @@ class MainFrameController {
 
     @ControllerAction
     void connectChatServer() {
-        String address = JOptionPane.showInputDialog("Copy/paste the address of the server here")
+        String address = JOptionPane.showInputDialog(trans("COPY_PASTE_SERVER_ADDRESS"))
         if (address == null)
             return
         Persona p
         try {
             p = new Persona(new ByteArrayInputStream(Base64.decode(address)))
         } catch (Exception bad) {
-            JOptionPane.showMessageDialog(null, "Invalid server address", "Invalid server address", JOptionPane.ERROR_MESSAGE)
+            JOptionPane.showMessageDialog(null, trans("INVALID_SERVER_ADDRESS"), trans("INVALID_SERVER_ADDRESS"), JOptionPane.ERROR_MESSAGE)
             return
         }
      
@@ -519,7 +555,7 @@ class MainFrameController {
         if (selectedFiles == null || selectedFiles.isEmpty())
             return
         
-        if (model.publishButtonText == "Unpublish") {
+        if (model.publishButtonText == "UNPUBLISH") {
             selectedFiles.each { 
                 it.unpublish()
                 model.core.eventBus.publish(new UIFileUnpublishedEvent(sf : it))

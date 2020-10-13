@@ -57,6 +57,7 @@ import com.muwire.core.update.UpdateDownloadedEvent
 import com.muwire.core.upload.UploadEvent
 import com.muwire.core.upload.UploadFinishedEvent
 import com.muwire.core.upload.Uploader
+import com.muwire.core.util.BandwidthCounter
 
 import griffon.core.GriffonApplication
 import griffon.core.artifact.GriffonModel
@@ -142,6 +143,9 @@ class MainFrameModel {
     @Observable boolean chatServerRunning
     
     @Observable Downloader downloader
+    
+    @Observable int downSpeed
+    @Observable int upSpeed
 
     private final Set<InfoHash> downloadInfoHashes = new ConcurrentHashSet<>()
 
@@ -177,22 +181,25 @@ class MainFrameModel {
                 if (!mvcGroup.alive)
                     return
 
-                // remove cancelled or finished downloads
+                // remove cancelled or finished or hopeless downloads
                 if (!clearButtonEnabled || uiSettings.clearCancelledDownloads || uiSettings.clearFinishedDownloads) {
                     def toRemove = []
                     downloads.each {
-                        if (it.downloader.getCurrentState() == Downloader.DownloadState.CANCELLED) {
+                        def state = it.downloader.getCurrentState()
+                        if (state == Downloader.DownloadState.CANCELLED) {
                             if (uiSettings.clearCancelledDownloads) {
                                 toRemove << it
                             } else {
                                 clearButtonEnabled = true
                             }
-                        } else if (it.downloader.getCurrentState() == Downloader.DownloadState.FINISHED) {
+                        } else if (state == Downloader.DownloadState.FINISHED) {
                             if (uiSettings.clearFinishedDownloads) {
                                 toRemove << it
                             } else {
                                 clearButtonEnabled = true
                             }
+                        } else if (state == Downloader.DownloadState.HOPELESS) {
+                            clearButtonEnabled = true
                         }
                     }
                     toRemove.each {
@@ -204,6 +211,14 @@ class MainFrameModel {
                 updateTablePreservingSelection("downloads-table")
                 updateTablePreservingSelection("trusted-table")
                 updateTablePreservingSelection("distrusted-table")
+                
+                int totalUpload = 0
+                uploads.each { 
+                    totalUpload += it.speed()
+                }
+                upSpeed = totalUpload
+                if (core != null) 
+                    downSpeed = core.downloadManager.totalDownloadSpeed()
             }
         }, 1000, 1000)
 
@@ -245,7 +260,7 @@ class MainFrameModel {
                 core.eventBus.publish(new ContentControlEvent(term : it, regex: true, add: true))
             }
             
-            chatServerRunning = core.chatServer.running.get()
+            chatServerRunning = core.chatServer.isRunning()
             
             timer.schedule({
                 if (core.shutdown.get())
@@ -274,8 +289,8 @@ class MainFrameModel {
                 trusted.addAll(core.trustService.good.values())
                 distrusted.addAll(core.trustService.bad.values())
 
-                resumeButtonText = "Retry"
-                publishButtonText = "Publish"
+                resumeButtonText = "RETRY"
+                publishButtonText = "PUBLISH"
                 
                 searchesPaneButtonEnabled = false
                 downloadsPaneButtonEnabled = true
@@ -438,11 +453,9 @@ class MainFrameModel {
                     return
                 }
             }
-            if (wrapper != null) {
-                wrapper.uploader = e.uploader
-                wrapper.requests++
-                wrapper.finished = false
-            } else
+            if (wrapper != null) 
+                wrapper.updateUploader(e.uploader)
+            else
                 uploads << new UploaderWrapper(uploader : e.uploader)
             updateTablePreservingSelection("uploads-table")
             view.refreshSharedFiles()
@@ -501,6 +514,9 @@ class MainFrameModel {
     }
 
     void onQueryEvent(QueryEvent e) {
+        if (!uiSettings.showMonitor)
+            return
+            
         if (e.replyTo == core.me.destination)
             return
 
@@ -672,6 +688,31 @@ class MainFrameModel {
         Uploader uploader
         int requests
         boolean finished
+        
+        private BandwidthCounter bwCounter = new BandwidthCounter(0)
+        
+        public int speed() {
+            
+            if (finished) 
+                return 0
+
+            initIfNeeded()
+            bwCounter.read(uploader.dataSinceLastRead())
+            bwCounter.average()
+        }
+        
+        void updateUploader(Uploader uploader) {
+            initIfNeeded()
+            bwCounter.read(this.uploader.dataSinceLastRead())
+            this.uploader = uploader
+            requests++
+            finished = false
+        }
+        
+        private void initIfNeeded() {
+            if (bwCounter.getMemory() != core.muOptions.speedSmoothSeconds)
+                bwCounter = new BandwidthCounter(core.muOptions.speedSmoothSeconds)
+        }
     }
     
     void onFeedLoadedEvent(FeedLoadedEvent e) {

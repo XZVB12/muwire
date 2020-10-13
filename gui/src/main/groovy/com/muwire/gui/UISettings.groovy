@@ -7,6 +7,7 @@ import java.awt.Font
 class UISettings {
 
     String lnf
+    String locale
     boolean showMonitor
     String font
     boolean autoFontSize
@@ -28,6 +29,7 @@ class UISettings {
     
     UISettings(Properties props) {
         lnf = props.getProperty("lnf", "system")
+        locale = props.getProperty("locale","us")
         showMonitor = Boolean.parseBoolean(props.getProperty("showMonitor", "false"))
         font = props.getProperty("font",null)
         clearCancelledDownloads = Boolean.parseBoolean(props.getProperty("clearCancelledDownloads","true"))
@@ -45,8 +47,8 @@ class UISettings {
         groupByFile = Boolean.parseBoolean(props.getProperty("groupByFile","false"))
         maxChatLines = Integer.parseInt(props.getProperty("maxChatLines","-1"))
         
-        mainFrameX = Integer.parseInt(props.getProperty("mainFrameX","1024"))
-        mainFrameY = Integer.parseInt(props.getProperty("mainFrameY","768"))
+        mainFrameX = Integer.parseInt(props.getProperty("mainFrameX","-1"))
+        mainFrameY = Integer.parseInt(props.getProperty("mainFrameY","-1"))
         
         searchHistory = DataUtil.readEncodedSet(props, "searchHistory")
         openTabs = DataUtil.readEncodedSet(props, "openTabs")
@@ -55,6 +57,7 @@ class UISettings {
     void write(OutputStream out) throws IOException {
         Properties props = new Properties()
         props.setProperty("lnf", lnf)
+        props.setProperty("locale", locale);
         props.setProperty("showMonitor", String.valueOf(showMonitor))
         props.setProperty("clearCancelledDownloads", String.valueOf(clearCancelledDownloads))
         props.setProperty("clearFinishedDownloads", String.valueOf(clearFinishedDownloads))

@@ -12,6 +12,7 @@ import java.awt.Font
 @ArtifactProviderFor(GriffonModel)
 class OptionsModel {
     @Observable String downloadRetryInterval
+    @Observable String downloadMaxFailures
     @Observable String updateCheckInterval
     @Observable boolean autoDownloadUpdate
     @Observable boolean shareDownloadedFiles
@@ -74,10 +75,13 @@ class OptionsModel {
     @Observable boolean advertiseChat
     @Observable int maxChatLines
     @Observable String chatWelcomeFile
+    
+    boolean disableUpdates
 
     void mvcGroupInit(Map<String, String> args) {
         MuWireSettings settings = application.context.get("muwire-settings")
         downloadRetryInterval = settings.downloadRetryInterval
+        downloadMaxFailures = settings.downloadMaxFailures
         updateCheckInterval = settings.updateCheckInterval
         autoDownloadUpdate = settings.autoDownloadUpdate
         shareDownloadedFiles = settings.shareDownloadedFiles
@@ -125,7 +129,7 @@ class OptionsModel {
         defaultFeedAutoDownload = settings.defaultFeedAutoDownload
         defaultFeedItemsToKeep = String.valueOf(settings.defaultFeedItemsToKeep)
         defaultFeedSequential = settings.defaultFeedSequential
-        defaultFeedUpdateInterval = String.valueOf(settings.defaultFeedUpdateInterval)
+        defaultFeedUpdateInterval = String.valueOf(Math.max(1L, (long)(settings.defaultFeedUpdateInterval / 60000L)))
 
         onlyTrusted = !settings.allowUntrusted()
         searchExtraHop = settings.searchExtraHop
@@ -137,5 +141,7 @@ class OptionsModel {
         advertiseChat = settings.advertiseChat
         maxChatLines = uiSettings.maxChatLines
         chatWelcomeFile = settings.chatWelcomeFile?.getAbsolutePath()
+        
+        disableUpdates = settings.disableUpdates
     }
 }

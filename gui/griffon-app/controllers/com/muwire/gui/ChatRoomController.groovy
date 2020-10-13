@@ -1,5 +1,7 @@
 package com.muwire.gui
 
+import static com.muwire.gui.Translator.trans
+
 import griffon.core.artifact.GriffonController
 import griffon.core.controller.ControllerAction
 import griffon.inject.MVCMember
@@ -15,6 +17,7 @@ import java.util.logging.Level
 
 import javax.annotation.Nonnull
 import javax.swing.JOptionPane
+import javax.swing.text.StyledDocument
 
 import com.muwire.core.Persona
 import com.muwire.core.chat.ChatCommand
@@ -25,7 +28,6 @@ import com.muwire.core.chat.ChatServer
 import com.muwire.core.trust.TrustEvent
 import com.muwire.core.trust.TrustLevel
 
-@Log
 @ArtifactProviderFor(GriffonController)
 class ChatRoomController {
     @MVCMember @Nonnull
@@ -48,20 +50,23 @@ class ChatRoomController {
         }
         
         if (!command.action.user) {
-            JOptionPane.showMessageDialog(null, "$words is not a user command","Invalid Command", JOptionPane.ERROR_MESSAGE)
+            JOptionPane.showMessageDialog(null, trans("NOT_USER_COMMAND",words),trans("INVALID_COMMAND"), JOptionPane.ERROR_MESSAGE)
             return
         }
         long now = System.currentTimeMillis()
         
         if (command.action == ChatAction.SAY && command.payload.length() > 0) {
-            String toShow = DataHelper.formatTime(now) + " <" + model.core.me.getHumanReadableName() + "> "+command.payload
+            String header = DataHelper.formatTime(now) + " <" + model.core.me.getHumanReadableName() + ">"
+            StyledDocument sd = view.roomTextArea.getStyledDocument()
+            sd.insertString(sd.getEndPosition().getOffset() - 1, header, sd.getStyle("italic"))
+            sd.insertString(sd.getEndPosition().getOffset() - 1, " ", sd.getStyle("regular"))
+            sd.insertString(sd.getEndPosition().getOffset() - 1, command.payload, sd.getStyle("regular"))
+            sd.insertString(sd.getEndPosition().getOffset() - 1, "\n", sd.getStyle("regular"))
 
-            view.roomTextArea.append(toShow)
-            view.roomTextArea.append('\n')
             trimLines()
         }
         
-        if (command.action == ChatAction.JOIN) {
+        if (command.action == ChatAction.JOIN && model.console) {
             String newRoom = command.payload
             String groupId = model.host.getHumanReadableName()+"-"+newRoom
             if (!mvcGroup.parentGroup.childrenGroups.containsKey(groupId)) {
@@ -122,7 +127,7 @@ class ChatRoomController {
         Persona p = view.getSelectedPersona()
         if (p == null)
             return
-        String reason = JOptionPane.showInputDialog("Enter reason (optional)")
+        String reason = JOptionPane.showInputDialog(trans("ENTER_REASON_OPTIONAL"))
         model.core.eventBus.publish(new TrustEvent(persona : p, level : TrustLevel.TRUSTED, reason : reason))
         view.refreshMembersTable()    
     }
@@ -131,7 +136,7 @@ class ChatRoomController {
         Persona p = view.getSelectedPersona()
         if (p == null)
             return
-        String reason = JOptionPane.showInputDialog("Enter reason (optional)")
+        String reason = JOptionPane.showInputDialog(trans("ENTER_REASON_OPTIONAL"))
         model.core.eventBus.publish(new TrustEvent(persona : p, level : TrustLevel.DISTRUSTED, reason : reason))
         view.refreshMembersTable()
     }
@@ -177,7 +182,6 @@ class ChatRoomController {
         try {
             command = new ChatCommand(e.payload)
         } catch (Exception bad) {
-            log.log(Level.WARNING,"bad chat command",bad)
             return
         }
         log.info("$model.room processing $command.action")
@@ -190,9 +194,8 @@ class ChatRoomController {
     }
     
     private void processSay(ChatMessageEvent e, String text) {
-        String toDisplay = DataHelper.formatTime(e.timestamp) + " <"+e.sender.getHumanReadableName()+"> " + text + "\n"
         runInsideUIAsync {
-            view.roomTextArea.append(toDisplay)
+            view.appendSay(text, e.sender, e.timestamp)
             trimLines()
             if (!model.console)
                 view.chatNotificator.onMessage(mvcGroup.mvcId)
@@ -200,10 +203,10 @@ class ChatRoomController {
     }
     
     private void processJoin(long timestamp, Persona p) {
-        String toDisplay = DataHelper.formatTime(timestamp) + " " + p.getHumanReadableName() + " joined the room\n"
+        String toDisplay = DataHelper.formatTime(timestamp) + " " + trans("JOINED_ROOM", p.getHumanReadableName()) + "\n"
         runInsideUIAsync {
             model.members.add(p)
-            view.roomTextArea.append(toDisplay)
+            view.appendGray(toDisplay)
             trimLines()
             view.membersTable?.model?.fireTableDataChanged()
         }
@@ -220,20 +223,20 @@ class ChatRoomController {
     }
     
     private void processLeave(long timestamp, Persona p) {
-        String toDisplay = DataHelper.formatTime(timestamp) + " " + p.getHumanReadableName() + " left the room\n"
+        String toDisplay = DataHelper.formatTime(timestamp) + " " + trans("LEFT_ROOM",p.getHumanReadableName()) + "\n"
         runInsideUIAsync {
             model.members.remove(p)
-            view.roomTextArea.append(toDisplay)
+            view.appendGray(toDisplay)
             trimLines()
             view.membersTable?.model?.fireTableDataChanged()
         }
     }
     
     void handleLeave(Persona p) {
-        String toDisplay = DataHelper.formatTime(System.currentTimeMillis()) + " " + p.getHumanReadableName() + " disconnected\n"
+        String toDisplay = DataHelper.formatTime(System.currentTimeMillis()) + " " + trans("USER_DISCONNECTED",p.getHumanReadableName()) + "\n"
         runInsideUIAsync {
             if (model.members.remove(p)) {
-                view.roomTextArea.append(toDisplay)
+                view.appendGray(toDisplay)
                 trimLines()
                 view.membersTable?.model?.fireTableDataChanged()
             }
@@ -243,11 +246,8 @@ class ChatRoomController {
     private void trimLines() {
         if (model.settings.maxChatLines < 0)
             return
-        while(view.roomTextArea.getLineCount() > model.settings.maxChatLines) {
-            int line0Start = view.roomTextArea.getLineStartOffset(0)
-            int line0End = view.roomTextArea.getLineEndOffset(0)
-            view.roomTextArea.replaceRange(null, line0Start, line0End)
-        }
+        while(view.getLineCount() > model.settings.maxChatLines) 
+            view.removeFirstLine()
     }
     
     void rejoinRoom() {

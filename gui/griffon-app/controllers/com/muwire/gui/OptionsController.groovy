@@ -12,9 +12,12 @@ import javax.annotation.Nonnull
 import javax.swing.JFileChooser
 import javax.swing.JOptionPane
 import java.awt.Font
+import java.awt.SystemTray
 
 import com.muwire.core.Core
 import com.muwire.core.MuWireSettings
+
+import static com.muwire.gui.Translator.trans
 
 @ArtifactProviderFor(GriffonController)
 class OptionsController {
@@ -59,13 +62,22 @@ class OptionsController {
 
         text = view.retryField.text
         model.downloadRetryInterval = text
-
         settings.downloadRetryInterval = Integer.valueOf(text)
-
-        text = view.updateField.text
-        model.updateCheckInterval = text
-        settings.updateCheckInterval = Integer.valueOf(text)
         
+        text = view.downloadMaxFailuresField.text
+        model.downloadMaxFailures = text
+        settings.downloadMaxFailures = Integer.valueOf(text)
+
+        if (!settings.disableUpdates) {
+            text = view.updateField.text
+            model.updateCheckInterval = text
+            settings.updateCheckInterval = Integer.valueOf(text)
+
+            boolean autoDownloadUpdate = view.autoDownloadUpdateCheckbox.model.isSelected()
+            model.autoDownloadUpdate = autoDownloadUpdate
+            settings.autoDownloadUpdate = autoDownloadUpdate
+        }
+                
         text = view.totalUploadSlotsField.text
         int totalUploadSlots = Integer.valueOf(text)
         model.totalUploadSlots = totalUploadSlots
@@ -79,11 +91,6 @@ class OptionsController {
         boolean searchComments = view.searchCommentsCheckbox.model.isSelected()
         model.searchComments = searchComments
         settings.searchComments = searchComments
-        
-        boolean autoDownloadUpdate = view.autoDownloadUpdateCheckbox.model.isSelected()
-        model.autoDownloadUpdate = autoDownloadUpdate
-        settings.autoDownloadUpdate = autoDownloadUpdate
-
 
         boolean shareDownloaded = view.shareDownloadedCheckbox.model.isSelected()
         model.shareDownloadedFiles = shareDownloaded
@@ -105,11 +112,13 @@ class OptionsController {
         model.speedSmoothSeconds = Integer.valueOf(text)
         settings.speedSmoothSeconds = Integer.valueOf(text)
         
-        String downloadLocation = model.downloadLocation
-        settings.downloadLocation = new File(downloadLocation)
-        
-        String incompleteLocation = model.incompleteLocation
-        settings.incompleteLocation = new File(incompleteLocation)
+        if (model.lnf != "Aqua") {
+            String downloadLocation = model.downloadLocation
+            settings.downloadLocation = new File(downloadLocation)
+
+            String incompleteLocation = model.incompleteLocation
+            settings.incompleteLocation = new File(incompleteLocation)
+        }
 
         if (settings.embeddedRouter) {
             text = view.inBwField.text
@@ -148,7 +157,7 @@ class OptionsController {
         
         String defaultFeedUpdateInterval = view.defaultFeedUpdateIntervalField.text
         model.defaultFeedUpdateInterval = defaultFeedUpdateInterval
-        settings.defaultFeedUpdateInterval = Integer.parseInt(defaultFeedUpdateInterval)
+        settings.defaultFeedUpdateInterval = Integer.parseInt(defaultFeedUpdateInterval) * 60000L
 
         // trust saving
 
@@ -230,9 +239,11 @@ class OptionsController {
         model.storeSearchHistory = storeSearchHistory
         uiSettings.storeSearchHistory = storeSearchHistory
         
-        uiSettings.exitOnClose = model.exitOnClose
-        if (model.closeDecisionMade)
-            uiSettings.closeWarning = false
+        if (SystemTray.isSupported()) {
+            uiSettings.exitOnClose = model.exitOnClose
+            if (model.closeDecisionMade)
+                uiSettings.closeWarning = false
+        }
             
         saveUISettings()
 
@@ -256,7 +267,7 @@ class OptionsController {
     void downloadLocation() {
         def chooser = new JFileChooser()
         chooser.setFileHidingEnabled(false)
-        chooser.setDialogTitle("Select location for downloaded files")
+        chooser.setDialogTitle(trans("OPTIONS_SELECT_LOCATION_DOWNLOADED_FILES"))
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
         int rv = chooser.showOpenDialog(null)
         if (rv == JFileChooser.APPROVE_OPTION)
@@ -267,7 +278,7 @@ class OptionsController {
     void incompleteLocation() {
         def chooser = new JFileChooser()
         chooser.setFileHidingEnabled(false)
-        chooser.setDialogTitle("Select location for downloaded files")
+        chooser.setDialogTitle(trans("OPTIONS_SELECT_LOCATION_INCOMPLETE_FILES"))
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
         int rv = chooser.showOpenDialog(null)
         if (rv == JFileChooser.APPROVE_OPTION)
@@ -279,12 +290,12 @@ class OptionsController {
         def chooser = new JFileChooser()
         chooser.with { 
             setFileHidingEnabled(false)
-            setDialogTitle("Select location of chat server welcome file")
+            setDialogTitle(trans("OPTIONS_SELECT_CHAT_SERVER_FILE"))
             setFileSelectionMode(JFileChooser.FILES_ONLY)
-            int rv = chooser.showOpenDialog(null)
-            if (rv == JFileChooser.APPROVE_OPTION)
-                model.chatWelcomeFile = getSelectedFile().getAbsolutePath()
         }
+        int rv = chooser.showOpenDialog(null)
+        if (rv == JFileChooser.APPROVE_OPTION)
+            model.chatWelcomeFile = getSelectedFile().getAbsolutePath()
     }
     
     @ControllerAction
@@ -324,6 +335,6 @@ class OptionsController {
     void clearHistory() {
         uiSettings.searchHistory.clear()
         saveUISettings()
-        JOptionPane.showMessageDialog(null, "Search history has been cleared")
+        JOptionPane.showMessageDialog(null, trans("OPTIONS_SEARCH_HISTORY_CLEARED"))
     }
 }

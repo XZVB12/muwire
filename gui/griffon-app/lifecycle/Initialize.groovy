@@ -1,4 +1,5 @@
 import griffon.core.GriffonApplication
+import groovy.swing.SwingBuilder
 import groovy.util.logging.Log
 import net.i2p.util.SystemVersion
 
@@ -6,27 +7,32 @@ import org.codehaus.griffon.runtime.core.AbstractLifecycleHandler
 
 import com.muwire.core.Core
 import com.muwire.core.MuWireSettings
+import com.muwire.gui.Translator
 import com.muwire.gui.UISettings
 
 import javax.annotation.Nonnull
 import javax.inject.Inject
 import javax.swing.ImageIcon
+import javax.swing.JFrame
 import javax.swing.JLabel
 import javax.swing.JPopupMenu
 import javax.swing.JTable
 import javax.swing.LookAndFeel
+import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.plaf.FontUIResource
 
 import static griffon.util.GriffonApplicationUtils.isMacOSX
 import static groovy.swing.SwingBuilder.lookAndFeel
 
+import java.awt.BorderLayout
 import java.awt.Font
 import java.awt.MenuItem
 import java.awt.PopupMenu
 import java.awt.SystemTray
 import java.awt.Toolkit
 import java.awt.TrayIcon
+import java.util.concurrent.CountDownLatch
 import java.util.logging.Level
 import java.util.logging.LogManager
 
@@ -39,56 +45,6 @@ class Initialize extends AbstractLifecycleHandler {
 
     @Override
     void execute() {
-        
-        System.setProperty("apple.eawt.quitStrategy", "CLOSE_ALL_WINDOWS");
-        
-        if (SystemTray.isSupported() && (SystemVersion.isMac() || SystemVersion.isWindows())) {
-            try {
-                def tray = SystemTray.getSystemTray()
-                def url = Initialize.class.getResource("/MuWire-16x16.png")
-                def image = new ImageIcon(url, "tray icon").getImage()
-                def popupMenu = new PopupMenu()
-                def trayIcon = new TrayIcon(image, "MuWire", popupMenu)
-
-
-                def exit = new MenuItem("Exit")
-                exit.addActionListener({
-                    application.getWindowManager().findWindow("main-frame").setVisible(false)
-                    application.getWindowManager().findWindow("shutdown-window").setVisible(true)
-                    Core core = application.getContext().get("core")
-                    if (core != null) {
-                        Thread t = new Thread({
-                            core.shutdown()
-                            application.shutdown()
-                        }as Runnable)
-                        t.start()
-                    } else
-                        application.shutdown()
-                    tray.remove(trayIcon)
-                })
-                
-                def showMW = {e ->
-                    def mainFrame = application.getWindowManager().findWindow("main-frame")
-                    if (mainFrame != null) {
-                        Core core = application.getContext().get("core")
-                        if (core != null)
-                            mainFrame.setVisible(true)
-                    }
-                }
-
-                def show = new MenuItem("Open MuWire")
-                show.addActionListener(showMW)
-                popupMenu.add(show)
-                popupMenu.add(exit)
-                tray.add(trayIcon)
-                
-                
-                trayIcon.addActionListener(showMW)
-                application.getContext().put("tray-icon", true)
-            } catch (Exception bad) {
-                log.log(Level.WARNING,"couldn't set tray icon",bad)
-            }
-        }
         
         log.info "Loading home dir"
         def portableHome = System.getProperty("portable.home")
@@ -158,27 +114,74 @@ class Initialize extends AbstractLifecycleHandler {
             Properties props = new Properties()
             uiSettings = new UISettings(props)
             log.info "will try default lnfs"
-            LookAndFeel chosen
-            if (isMacOSX()) {
-                    uiSettings.lnf = "metal"
-                    chosen = lookAndFeel("metal")
-            } else {
-                chosen = lookAndFeel('system', 'gtk')
-                if (chosen == null)
-                    chosen = lookAndFeel('metal')
-                uiSettings.lnf = chosen.getID()
-                log.info("ended up applying $chosen.name")
-            }
             
+            LookAndFeel chosen = lookAndFeel('system', 'gtk', 'metal')
+            uiSettings.lnf = chosen.getID()
+            log.info("ended up applying $chosen.name")
+
             FontUIResource defaultFont = chosen.getDefaults().getFont("Label.font")
             uiSettings.font = defaultFont.getName()
             uiSettings.fontSize = defaultFont.getSize()
             uiSettings.fontStyle = defaultFont.getStyle()
             rowHeight = uiSettings.fontSize + 3
+            
+            uiSettings.locale = showLanguageDialog()
         }
 
         application.context.put("row-height", rowHeight)
         application.context.put("ui-settings", uiSettings)
+        
+        Translator.setLocale(uiSettings.locale);
+        
+        System.setProperty("apple.eawt.quitStrategy", "CLOSE_ALL_WINDOWS");
+        
+        if (SystemTray.isSupported()) {
+            try {
+                def tray = SystemTray.getSystemTray()
+                def url = Initialize.class.getResource("/MuWire-16x16.png")
+                def image = new ImageIcon(url, "tray icon").getImage()
+                def popupMenu = new PopupMenu()
+                def trayIcon = new TrayIcon(image, "MuWire", popupMenu)
+
+
+                def exit = new MenuItem(Translator.trans("EXIT"))
+                exit.addActionListener({
+                    application.getWindowManager().findWindow("main-frame").setVisible(false)
+                    application.getWindowManager().findWindow("shutdown-window").setVisible(true)
+                    Core core = application.getContext().get("core")
+                    if (core != null) {
+                        Thread t = new Thread({
+                            core.shutdown()
+                            application.shutdown()
+                        }as Runnable)
+                        t.start()
+                    } else
+                        application.shutdown()
+                    tray.remove(trayIcon)
+                })
+                
+                def showMW = {e ->
+                    def mainFrame = application.getWindowManager().findWindow("main-frame")
+                    if (mainFrame != null) {
+                        Core core = application.getContext().get("core")
+                        if (core != null)
+                            mainFrame.setVisible(true)
+                    }
+                }
+
+                def show = new MenuItem(Translator.trans("OPEN_MUWIRE"))
+                show.addActionListener(showMW)
+                popupMenu.add(show)
+                popupMenu.add(exit)
+                tray.add(trayIcon)
+                
+                
+                trayIcon.addActionListener(showMW)
+                application.getContext().put("tray-icon", true)
+            } catch (Exception bad) {
+                log.log(Level.WARNING,"couldn't set tray icon",bad)
+            }
+        }
     }
 
     private static String selectHome() {
@@ -199,6 +202,40 @@ class Initialize extends AbstractLifecycleHandler {
             return muwire.getAbsolutePath()
         }
         defaultHome.getAbsolutePath()
+    }
+
+    private String showLanguageDialog() {
+        if (Translator.SUPPORTED_LOCALES.size() == 1)
+            return Locale.US.toLanguageTag()
+        def builder = new SwingBuilder()
+        def languageComboBox
+        def chooseButton
+        def frame = builder.frame (visible : true, locationRelativeTo: null,
+        defaultCloseOperation : JFrame.EXIT_ON_CLOSE,
+        iconImage : builder.imageIcon("/MuWire-48x48.png").image) {
+            borderLayout()
+            panel(constraints : BorderLayout.NORTH) {
+                label("Select Language")
+            }
+            
+            languageComboBox = comboBox (editable: false, items : Translator.LOCALE_WRAPPERS, constraints : BorderLayout.CENTER)
+            
+            panel (constraints : BorderLayout.SOUTH) {
+                chooseButton = button(text : "Choose")
+            }
+        }
+        
+        CountDownLatch latch = new CountDownLatch(1)
+        chooseButton.addActionListener({
+            frame.setVisible(false)
+            latch.countDown()
+        })
+        SwingUtilities.invokeAndWait({
+            frame.pack()
+            frame.setVisible(true)
+        })
+        latch.await()
+        languageComboBox.getSelectedItem().locale.toLanguageTag()
     }
 }
 

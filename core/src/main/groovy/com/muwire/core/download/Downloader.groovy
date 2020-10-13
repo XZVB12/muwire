@@ -2,6 +2,8 @@ package com.muwire.core.download
 
 import com.muwire.core.InfoHash
 import com.muwire.core.Persona
+import com.muwire.core.chat.ChatManager
+import com.muwire.core.chat.ChatServer
 import com.muwire.core.connection.Endpoint
 
 import java.nio.file.AtomicMoveNotSupportedException
@@ -21,6 +23,7 @@ import com.muwire.core.EventBus
 import com.muwire.core.connection.I2PConnector
 import com.muwire.core.files.FileDownloadedEvent
 import com.muwire.core.util.DataUtil
+import com.muwire.core.util.BandwidthCounter
 
 import groovy.util.logging.Log
 import net.i2p.data.Destination
@@ -29,7 +32,7 @@ import net.i2p.util.ConcurrentHashSet
 @Log
 public class Downloader {
     
-    public enum DownloadState { CONNECTING, HASHLIST, DOWNLOADING, FAILED, CANCELLED, PAUSED, FINISHED }
+    public enum DownloadState { CONNECTING, HASHLIST, DOWNLOADING, FAILED, HOPELESS, CANCELLED, PAUSED, FINISHED }
     private enum WorkerState { CONNECTING, HASHLIST, DOWNLOADING, FINISHED}
 
     private static final ExecutorService executorService = Executors.newCachedThreadPool({r ->
@@ -41,6 +44,7 @@ public class Downloader {
 
     private final EventBus eventBus
     private final DownloadManager downloadManager
+    private final ChatServer chatServer
     private final Persona me
     private final File file
     private final Pieces pieces
@@ -55,26 +59,30 @@ public class Downloader {
     private final File incompleteFile
     final int pieceSizePow2
     private final Map<Destination, DownloadWorker> activeWorkers = new ConcurrentHashMap<>()
-    private final Set<Destination> successfulDestinations = new ConcurrentHashSet<>()
+    final Set<Destination> successfulDestinations = new ConcurrentHashSet<>()
+    /** LOCKING: itself */
+    private final Map<Destination, Integer> failingDestinations = new HashMap<>()
+    private final int maxFailures
+    
+    private final int queueSize
 
 
     private volatile boolean cancelled, paused
     private final AtomicBoolean eventFired = new AtomicBoolean()
+    private final AtomicBoolean hopelessEventFired = new AtomicBoolean()
     private boolean piecesFileClosed
 
-    private final AtomicLong dataSinceLastRead = new AtomicLong(0)
-    private volatile long lastSpeedRead = System.currentTimeMillis()
-    private ArrayList speedArr = new ArrayList<Integer>()
-    private int speedPos = 0
-    private int speedAvg = 0
+    private final AtomicLong dataSinceLastRead = new AtomicLong()
+    private volatile BandwidthCounter bwCounter = new BandwidthCounter(0)
 
-    public Downloader(EventBus eventBus, DownloadManager downloadManager,
+    public Downloader(EventBus eventBus, DownloadManager downloadManager, ChatServer chatServer,
         Persona me, File file, long length, InfoHash infoHash,
         int pieceSizePow2, I2PConnector connector, Set<Destination> destinations,
-        File incompletes, Pieces pieces) {
+        File incompletes, Pieces pieces, int maxFailures) {
         this.eventBus = eventBus
         this.me = me
         this.downloadManager = downloadManager
+        this.chatServer = chatServer
         this.file = file
         this.infoHash = infoHash
         this.length = length
@@ -87,6 +95,15 @@ public class Downloader {
         this.pieceSize = 1 << pieceSizePow2
         this.pieces = pieces
         this.nPieces = pieces.nPieces
+        this.maxFailures = maxFailures
+        
+        // base queue size on download piece size
+        int queueSize = 1
+        if (pieceSizePow2 < 19)
+            queueSize++
+        if (pieceSizePow2 < 18)
+            queueSize++
+        this.queueSize = queueSize
     }
 
     public synchronized InfoHash getInfoHash() {
@@ -116,7 +133,7 @@ public class Downloader {
     void download() {
         readPieces()
         destinations.each {
-            if (it != me.destination) {
+            if (it != me.destination && !isHopeless(it)) {
                 def worker = new DownloadWorker(it)
                 activeWorkers.put(it, worker)
                 executorService.submit(worker)
@@ -156,41 +173,15 @@ public class Downloader {
 
     public int speed() {
         int currSpeed = 0
-        if (getCurrentState() == DownloadState.DOWNLOADING) {
-            long dataRead = dataSinceLastRead.getAndSet(0)
-            long now = System.currentTimeMillis()
-            if (now > lastSpeedRead)
-                currSpeed = (int) (dataRead * 1000.0d / (now - lastSpeedRead))
-            lastSpeedRead = now
-        }
-        
-        if (speedArr.size() != downloadManager.muSettings.speedSmoothSeconds) {
-            speedArr.clear()
-            downloadManager.muSettings.speedSmoothSeconds.times { speedArr.add(0) }
-            speedPos = 0
-        }
+        if (getCurrentState() != DownloadState.DOWNLOADING)
+            return currSpeed
 
-        // normalize to speedArr.size
-        currSpeed /= speedArr.size()
+        // this is not very accurate since each slot may hold more than a second
+        if (bwCounter.getMemory() != downloadManager.muSettings.speedSmoothSeconds) 
+            bwCounter = new BandwidthCounter(downloadManager.muSettings.speedSmoothSeconds)
 
-        // compute new speedAvg and update speedArr
-        if ( speedArr[speedPos] > speedAvg ) {
-            speedAvg = 0
-        } else {
-            speedAvg -= speedArr[speedPos]
-        }
-        speedAvg += currSpeed
-        speedArr[speedPos] = currSpeed
-        // this might be necessary due to rounding errors
-        if (speedAvg < 0)
-            speedAvg = 0
-
-        // rolling index over the speedArr
-        speedPos++
-        if (speedPos >= speedArr.size())
-            speedPos=0
-
-        speedAvg
+        bwCounter.read((int)dataSinceLastRead.getAndSet(0))
+        bwCounter.average()
     }
 
     public DownloadState getCurrentState() {
@@ -206,6 +197,8 @@ public class Downloader {
         if (allFinished) {
             if (pieces.isComplete())
                 return DownloadState.FINISHED
+            if (!hasLiveSources())
+                return DownloadState.HOPELESS
             return DownloadState.FAILED
         }
 
@@ -269,11 +262,22 @@ public class Downloader {
     public int getTotalWorkers() {
         return activeWorkers.size();
     }
+    
+    public int countHopelessSources() {
+        synchronized(failingDestinations) {
+            return destinations.count { isHopeless(it)}
+        }
+    }
+    
+    private boolean hasLiveSources() {
+        destinations.size() > countHopelessSources()
+    }
 
     public void resume() {
         paused = false
         readPieces()
-        destinations.each { destination ->
+        destinations.stream().filter({!isHopeless(it)}).forEach { destination ->
+            log.fine("resuming source ${destination.toBase32()}")
             def worker = activeWorkers.get(destination)
             if (worker != null) {
                 if (worker.currentState == WorkerState.FINISHED) {
@@ -290,8 +294,9 @@ public class Downloader {
     }
 
     void addSource(Destination d) {
-        if (activeWorkers.containsKey(d))
+        if (activeWorkers.containsKey(d) || isHopeless(d))
             return
+        destinations.add(d)
         DownloadWorker newWorker = new DownloadWorker(d)
         activeWorkers.put(d, newWorker)
         executorService.submit(newWorker)
@@ -347,13 +352,35 @@ public class Downloader {
             try {os?.close() } catch (IOException ignore) {}
         }
     }
+    
+    private boolean isHopeless(Destination d) {
+        if (maxFailures < 0)
+            return false
+        synchronized(failingDestinations) {
+            return !successfulDestinations.contains(d) &&
+                    failingDestinations.containsKey(d) &&
+                    failingDestinations[d] >= maxFailures
+        }
+    }
+    
+    private void markFailed(Destination d) {
+        log.fine("marking failed ${d.toBase32()}")
+        synchronized(failingDestinations) {
+            Integer count = failingDestinations.get(d)
+            if (count == null) {
+                failingDestinations.put(d, 1)
+            } else {
+                failingDestinations.put(d, count + 1)
+            }
+        }
+    }
 
     class DownloadWorker implements Runnable {
         private final Destination destination
         private volatile WorkerState currentState
         private volatile Thread downloadThread
         private Endpoint endpoint
-        private volatile DownloadSession currentSession
+        private final LinkedList<DownloadSession> sessionQueue = new LinkedList<>()
         private final Set<Integer> available = new HashSet<>()
 
         DownloadWorker(Destination destination) {
@@ -373,11 +400,43 @@ public class Downloader {
                     setInfoHash(received)
                 }
                 currentState = WorkerState.DOWNLOADING
+                
+                boolean browse = downloadManager.muSettings.browseFiles
+                boolean feed = downloadManager.muSettings.fileFeed && downloadManager.muSettings.advertiseFeed
+                boolean chat = chatServer.isRunning() && downloadManager.muSettings.advertiseChat
+                
+                Set<Integer> queuedPieces = new HashSet<>()
                 boolean requestPerformed
                 while(!pieces.isComplete()) {
-                    currentSession = new DownloadSession(eventBus, me.toBase64(), pieces, getInfoHash(),
-                        endpoint, incompleteFile, pieceSize, length, available, dataSinceLastRead)
-                    requestPerformed = currentSession.request()
+                    if (sessionQueue.isEmpty()) {
+                        boolean sentAnyRequests = false
+                        queueSize.times {
+                            available.removeAll(queuedPieces)
+                            def currentSession = new DownloadSession(eventBus, me.toBase64(), pieces, getInfoHash(),
+                                    endpoint, incompleteFile, pieceSize, length, available, dataSinceLastRead,
+                                    browse, feed, chat)
+                            if (currentSession.sendRequest()) {
+                                queuedPieces.add(currentSession.piece)
+                                sessionQueue.addLast(currentSession)
+                                sentAnyRequests = true
+                            }
+                        }
+                        if (!sentAnyRequests)
+                            break;
+                        endpoint.getOutputStream().flush()
+                    }
+                    available.removeAll(queuedPieces)
+                    def nextSession = new DownloadSession(eventBus, me.toBase64(), pieces, getInfoHash(),
+                                endpoint, incompleteFile, pieceSize, length, available, dataSinceLastRead,
+                                browse, feed, chat)
+                    if (nextSession.sendRequest()) {
+                        sessionQueue.addLast(nextSession)
+                        queuedPieces.add(nextSession.piece)
+                    }
+                   
+                    def currentSession = sessionQueue.removeFirst()
+                    requestPerformed = currentSession.consumeResponse()
+                    queuedPieces.remove(currentSession.piece)
                     if (!requestPerformed)
                         break
                     successfulDestinations.add(endpoint.destination)
@@ -385,6 +444,9 @@ public class Downloader {
                 }
             } catch (Exception bad) {
                 log.log(Level.WARNING,"Exception while downloading",DataUtil.findRoot(bad))
+                markFailed(destination)
+                if (!hasLiveSources() && hopelessEventFired.compareAndSet(false, true)) 
+                    eventBus.publish(new DownloadHopelessEvent(downloader : Downloader.this))
             } finally {
                 writePieces()
                 currentState = WorkerState.FINISHED

@@ -4,12 +4,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.muwire.core.Core;
 import com.muwire.core.upload.UploadEvent;
 import com.muwire.core.upload.UploadFinishedEvent;
 import com.muwire.core.upload.Uploader;
+import com.muwire.core.util.BandwidthCounter;
 
 public class UploadManager {
     
@@ -24,6 +24,13 @@ public class UploadManager {
         return uploads;
     }
     
+    public int totalUploadSpeed() {
+        int total = 0;
+        for (UploaderWrapper uw : uploads)
+            total += uw.speed();
+        return total;
+    }
+    
     public void onUploadEvent(UploadEvent e) {
         UploaderWrapper wrapper = null;
         synchronized(uploads) {
@@ -35,9 +42,7 @@ public class UploadManager {
             }
         }
         if (wrapper != null) {
-            wrapper.uploader = e.getUploader();
-            wrapper.requests++;
-            wrapper.finished = false;
+            wrapper.updateUploader(e.getUploader());
         } else {
             wrapper = new UploaderWrapper();
             wrapper.uploader = e.getUploader();
@@ -69,10 +74,12 @@ public class UploadManager {
         }
     }
     
-    public static class UploaderWrapper {
+    public class UploaderWrapper {
         private volatile Uploader uploader;
         private volatile int requests;
         private volatile boolean finished;
+        
+        private volatile BandwidthCounter bwCounter = new BandwidthCounter(0);
         
         public Uploader getUploader() {
             return uploader;
@@ -84,6 +91,28 @@ public class UploadManager {
         
         public boolean isFinished() {
             return finished;
+        }
+        
+        public synchronized int speed() {
+            if (finished)
+                return 0;
+            
+            initIfNeeded();
+            bwCounter.read(uploader.dataSinceLastRead());
+            return bwCounter.average();
+        }
+        
+        synchronized void updateUploader(Uploader uploader) {
+            initIfNeeded();
+            bwCounter.read(this.uploader.dataSinceLastRead());
+            this.uploader = uploader;
+            requests++;
+            finished = false;
+        }
+        
+        private void initIfNeeded() {
+            if (bwCounter.getMemory() != core.getMuOptions().getSpeedSmoothSeconds())
+                bwCounter = new BandwidthCounter(core.getMuOptions().getSpeedSmoothSeconds());
         }
     }
 }

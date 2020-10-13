@@ -4,6 +4,7 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 
 import com.muwire.core.InfoHash
+import com.muwire.core.Persona
 import com.muwire.core.connection.Endpoint
 
 import net.i2p.data.Base64
@@ -31,9 +32,9 @@ class HashListUploader extends Uploader {
                 int start = mapped.position()
                 mapped.get(tmp, 0, Math.min(tmp.length, mapped.remaining()))
                 read = mapped.position() - start
-                dataSinceLastRead += read
             }
             endpoint.getOutputStream().write(tmp, 0, read)
+            dataSinceLastRead.addAndGet(read)
         }
         endpoint.getOutputStream().flush()
     }
@@ -74,5 +75,25 @@ class HashListUploader extends Uploader {
             return false
         HashListUploader other = (HashListUploader)o
         infoHash == other.infoHash && request.downloader == other.request.downloader
+    }
+
+    @Override
+    public boolean isBrowseEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean isFeedEnabled() {
+        return false;
+    }
+
+    @Override
+    public boolean isChatEnabled() {
+        return false;
+    }
+
+    @Override
+    public Persona getDownloaderPersona() {
+        request.downloader
     }
 }

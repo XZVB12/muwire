@@ -7,6 +7,7 @@ import com.muwire.core.Core
 import com.muwire.core.upload.UploadEvent
 import com.muwire.core.upload.UploadFinishedEvent
 import com.muwire.core.upload.Uploader
+import com.muwire.core.util.BandwidthCounter
 
 import net.i2p.data.DataHelper
 
@@ -43,8 +44,7 @@ class UploadsModel {
                 }
             }
             if (found != null) {
-                found.uploader = e.uploader
-                found.finished = false
+                found.updateUploader(e.uploader)
             } else
                 uploaders << new UploaderWrapper(uploader : e.uploader)
         }
@@ -88,20 +88,43 @@ class UploadsModel {
                 totalSize = " of " + DataHelper.formatSize2Decimal(size, false) + "B"
             String remotePieces = String.format("%02d", percentTotal) + "% ${totalSize} ($done/$pieces) pcs".toString()
             
-            String speed = DataHelper.formatSize2Decimal(it.uploader.speed(), false) + "B/sec"
+            String speed = DataHelper.formatSize2Decimal(it.speed(), false) + "B/sec"
             
             
             model.addRow([name, percentString, downloader, remotePieces, speed])
         }
     }
     
-    private static class UploaderWrapper {
+    private class UploaderWrapper {
         Uploader uploader
         boolean finished
+        
+        private BandwidthCounter bwCounter = new BandwidthCounter(0);
         
         @Override
         public String toString() {
             uploader.getName()
+        }
+        
+        public int speed() {
+            if (finished)
+                return 0
+            
+            initIfNeeded()
+            bwCounter.read(uploader.dataSinceLastRead())
+            bwCounter.average()
+        }
+        
+        void updateUploader(Uploader e) {
+            initIfNeeded()
+            bwCounter.read(uploader.dataSinceLastRead())
+            this.uploader = uploader
+            finished = false
+        }
+        
+        private void initIfNeeded() {
+            if (bwCounter.getMemory() != core.muOptions.speedSmoothSeconds)
+                bwCounter = new BandwidthCounter(core.muOptions.speedSmoothSeconds)
         }
     }
 }

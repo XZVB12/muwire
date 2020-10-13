@@ -16,7 +16,7 @@ class MuWireSettings {
     boolean allowTrustLists
     int trustListInterval
     Set<Persona> trustSubscriptions
-    int downloadRetryInterval
+    int downloadRetryInterval, downloadMaxFailures
     int totalUploadSlots
     int uploadSlotsPerUser
     int updateCheckInterval
@@ -37,10 +37,14 @@ class MuWireSettings {
     boolean advertiseFeed
     boolean autoPublishSharedFiles
     boolean defaultFeedAutoDownload
-    int defaultFeedUpdateInterval
+    long defaultFeedUpdateInterval
     int defaultFeedItemsToKeep
     boolean defaultFeedSequential
     
+    int peerConnections
+    int leafConnections
+    
+    int responderCacheSize
     
     boolean startChatServer
     int maxChatConnections
@@ -48,11 +52,12 @@ class MuWireSettings {
     File chatWelcomeFile
     Set<String> watchedDirectories
     float downloadSequentialRatio
-    int hostClearInterval, hostHopelessInterval, hostRejectInterval
+    int hostClearInterval, hostHopelessInterval, hostRejectInterval, hostHopelessPurgeInterval
     int meshExpiration
     int speedSmoothSeconds
     boolean embeddedRouter
     boolean plugin
+    boolean disableUpdates
     int inBw, outBw
     Set<String> watchedKeywords
     Set<String> watchedRegexes
@@ -76,6 +81,7 @@ class MuWireSettings {
         if (incompleteLocationProp != null)
             incompleteLocation = new File(incompleteLocationProp)
         downloadRetryInterval = Integer.parseInt(props.getProperty("downloadRetryInterval","60"))
+        downloadMaxFailures = Integer.parseInt(props.getProperty("downloadMaxFailures","10"))
         updateCheckInterval = Integer.parseInt(props.getProperty("updateCheckInterval","24"))
         lastUpdateCheck = Long.parseLong(props.getProperty("lastUpdateChec","0"))
         autoDownloadUpdate = Boolean.parseBoolean(props.getProperty("autoDownloadUpdate","true"))
@@ -84,11 +90,13 @@ class MuWireSettings {
         shareHiddenFiles = Boolean.parseBoolean(props.getProperty("shareHiddenFiles","false"))
         downloadSequentialRatio = Float.valueOf(props.getProperty("downloadSequentialRatio","0.8"))
         hostClearInterval = Integer.valueOf(props.getProperty("hostClearInterval","15"))
-        hostHopelessInterval = Integer.valueOf(props.getProperty("hostHopelessInterval", "1440"))
+        hostHopelessInterval = Integer.valueOf(props.getProperty("hostHopelessInterval", "60"))
         hostRejectInterval = Integer.valueOf(props.getProperty("hostRejectInterval", "1"))
+        hostHopelessPurgeInterval = Integer.valueOf(props.getProperty("hostHopelessPurgeInterval","1440"))
         meshExpiration = Integer.valueOf(props.getProperty("meshExpiration","60"))
         embeddedRouter = Boolean.valueOf(props.getProperty("embeddedRouter","false"))
         plugin = Boolean.valueOf(props.getProperty("plugin","false"))
+        disableUpdates = Boolean.valueOf(props.getProperty("disableUpdates","false"))
         inBw = Integer.valueOf(props.getProperty("inBw","256"))
         outBw = Integer.valueOf(props.getProperty("outBw","128"))
         searchComments = Boolean.valueOf(props.getProperty("searchComments","true"))
@@ -102,7 +110,14 @@ class MuWireSettings {
         defaultFeedAutoDownload = Boolean.valueOf(props.getProperty("defaultFeedAutoDownload", "false"))
         defaultFeedItemsToKeep = Integer.valueOf(props.getProperty("defaultFeedItemsToKeep", "1000"))
         defaultFeedSequential = Boolean.valueOf(props.getProperty("defaultFeedSequential", "false"))
-        defaultFeedUpdateInterval = Integer.valueOf(props.getProperty("defaultFeedUpdateInterval", "60000"))
+        defaultFeedUpdateInterval = Long.valueOf(props.getProperty("defaultFeedUpdateInterval", "3600000"))
+        
+        // ultrapeer connection settings
+        leafConnections = Integer.valueOf(props.getProperty("leafConnections","512"))
+        peerConnections = Integer.valueOf(props.getProperty("peerConnections","128"))
+        
+        // responder cache settings
+        responderCacheSize = Integer.valueOf(props.getProperty("responderCacheSize","32"))
         
         speedSmoothSeconds = Integer.valueOf(props.getProperty("speedSmoothSeconds","10"))
         totalUploadSlots = Integer.valueOf(props.getProperty("totalUploadSlots","-1"))
@@ -142,6 +157,7 @@ class MuWireSettings {
         if (incompleteLocation != null)
             props.setProperty("incompleteLocation", incompleteLocation.getAbsolutePath())
         props.setProperty("downloadRetryInterval", String.valueOf(downloadRetryInterval))
+        props.setProperty("downloadMaxFailures", String.valueOf(downloadMaxFailures))
         props.setProperty("updateCheckInterval", String.valueOf(updateCheckInterval))
         props.setProperty("lastUpdateCheck", String.valueOf(lastUpdateCheck))
         props.setProperty("autoDownloadUpdate", String.valueOf(autoDownloadUpdate))
@@ -152,9 +168,11 @@ class MuWireSettings {
         props.setProperty("hostClearInterval", String.valueOf(hostClearInterval))
         props.setProperty("hostHopelessInterval", String.valueOf(hostHopelessInterval))
         props.setProperty("hostRejectInterval", String.valueOf(hostRejectInterval))
+        props.setProperty("hostHopelessPurgeInterval", String.valueOf(hostHopelessPurgeInterval))
         props.setProperty("meshExpiration", String.valueOf(meshExpiration))
         props.setProperty("embeddedRouter", String.valueOf(embeddedRouter))
         props.setProperty("plugin", String.valueOf(plugin))
+        props.setProperty("disableUpdates", String.valueOf(disableUpdates))
         props.setProperty("inBw", String.valueOf(inBw))
         props.setProperty("outBw", String.valueOf(outBw))
         props.setProperty("searchComments", String.valueOf(searchComments))
@@ -169,6 +187,13 @@ class MuWireSettings {
         props.setProperty("defaultFeedItemsToKeep", String.valueOf(defaultFeedItemsToKeep))
         props.setProperty("defaultFeedSequential", String.valueOf(defaultFeedSequential))
         props.setProperty("defaultFeedUpdateInterval", String.valueOf(defaultFeedUpdateInterval))
+        
+        // ultrapeer connection settings
+        props.setProperty("peerConnections", String.valueOf(peerConnections))
+        props.setProperty("leafConnections", String.valueOf(leafConnections))
+        
+        // responder cache settings
+        props.setProperty("responderCacheSize", String.valueOf(responderCacheSize))
         
         props.setProperty("speedSmoothSeconds", String.valueOf(speedSmoothSeconds))
         props.setProperty("totalUploadSlots", String.valueOf(totalUploadSlots))

@@ -23,21 +23,24 @@ import com.muwire.core.Persona;
 import com.muwire.core.search.UIResultEvent;
 import com.muwire.core.trust.TrustLevel;
 
+import static com.muwire.webui.Util._t;
+
 import net.i2p.data.Base64;
 import net.i2p.data.DataHelper;
 
 public class SearchServlet extends HttpServlet {
     
-    private Core core;
-    private SearchManager searchManager;
-    private ConnectionCounter connectionCounter;
-    private DownloadManager downloadManager;
-    private BrowseManager browseManager;
+    private volatile Core core;
+    private volatile SearchManager searchManager;
+    private volatile ConnectionCounter connectionCounter;
+    private volatile DownloadManager downloadManager;
+    private volatile UploadManager uploadManager;
+    private volatile BrowseManager browseManager;
 
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         if (searchManager == null) {
-            resp.sendError(403, "Not initialized");
+            resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
             return;
         }
         String action = req.getParameter("action");
@@ -48,7 +51,7 @@ public class SearchServlet extends HttpServlet {
             if (newUUID != null)
                 resp.sendRedirect("/MuWire/Home?uuid=" + newUUID.toString());
             else
-                resp.sendError(403, Util._t("Please enter a search keyword or file hash"));
+                resp.sendError(403, _t("Please enter a search keyword or file hash"));
         } else if (action.equals("stop")) {
             String uuidString = req.getParameter("uuid");
             UUID uuid = UUID.fromString(uuidString);
@@ -69,7 +72,7 @@ public class SearchServlet extends HttpServlet {
         sb.append("<?xml version='1.0' encoding='UTF-8'?>");
         if (section.equals("status")) {
             if (searchManager == null || downloadManager == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
             
@@ -88,7 +91,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("</Searches>");
         } else if (section.equals("senders")) {
             if (searchManager == null || downloadManager == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
             
@@ -124,7 +127,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("</Senders>");
         } else if (section.equals("resultsFromSender")) {
             if (searchManager == null || downloadManager == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
             
@@ -166,7 +169,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("</ResultsFromSender>");
         } else if (section.equals("results")) {
             if (searchManager == null || downloadManager == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
             
@@ -205,7 +208,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("</Results>");
         } else if (section.equals("sendersForResult")) {
             if (searchManager == null || downloadManager == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
             
@@ -254,12 +257,14 @@ public class SearchServlet extends HttpServlet {
             
         } else if (section.equals("connectionsCount")) {
             if (connectionCounter == null) {
-                resp.sendError(403, "Not initialized");
+                resp.sendError(403, _t("MuWire failed to initialize.  Please close the browser window and restart the plugin"));
                 return;
             }
-            sb.append("<Connections>");
-            sb.append(connectionCounter.getConnections());
-            sb.append("</Connections>");
+            sb.append("<NetworkStatus>");
+            sb.append("<Connections>").append(connectionCounter.getConnections()).append("</Connections>");
+            sb.append("<DownBW>").append(DataHelper.formatSize2Decimal(core.getDownloadManager().totalDownloadSpeed(), false) + Util._t("B/sec")).append("</DownBW>");
+            sb.append("<UpBW>").append(DataHelper.formatSize2Decimal(uploadManager.totalUploadSpeed(), false) + Util._t("B/sec")).append("</UpBW>");
+            sb.append("</NetworkStatus>");
         } else {
             resp.sendError(403, "Bad section param");
             return;
@@ -282,6 +287,7 @@ public class SearchServlet extends HttpServlet {
         searchManager = (SearchManager) config.getServletContext().getAttribute("searchManager");
         connectionCounter = (ConnectionCounter) config.getServletContext().getAttribute("connectionCounter");
         downloadManager = (DownloadManager) config.getServletContext().getAttribute("downloadManager");
+        uploadManager = (UploadManager) config.getServletContext().getAttribute("uploadManager");
         browseManager = (BrowseManager) config.getServletContext().getAttribute("browseManager");
         core = (Core) config.getServletContext().getAttribute("core");
     }
@@ -311,6 +317,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("<Name>").append(Util.escapeHTMLinXML(persona.getHumanReadableName())).append("</Name>");
             sb.append("<B64>").append(persona.toBase64()).append("</B64>");
             sb.append("<Trust>").append(trustLevel.toString()).append("</Trust>");
+            sb.append("<TrustString>").append(Util._t(EnumStrings.TRUST_LEVELS.get(trustLevel))).append("</TrustString>");
             sb.append("<Browse>").append(browse).append("</Browse>");
             sb.append("<Browsing>").append(browsing).append("</Browsing>");
             sb.append("<Results>").append(results).append("</Results>");
@@ -343,6 +350,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("<Size>").append(DataHelper.formatSize2Decimal(size, false)).append("B").append("</Size>");
             sb.append("<InfoHash>").append(Base64.encode(infoHash.getRoot())).append("</InfoHash>");
             sb.append("<ResultStatus>").append(resultStatus).append("</ResultStatus>");
+            sb.append("<ResultStatusString>").append(Util._t(EnumStrings.RESULT_STATES.get(resultStatus))).append("</ResultStatusString>");
             if (comment != null)
                 sb.append("<Comment>").append(Util.escapeHTMLinXML(comment)).append("</Comment>");
             sb.append("<Certificates>").append(certificates).append("</Certificates>");
@@ -371,6 +379,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("<Size>").append(DataHelper.formatSize2Decimal(size, false)).append("B").append("</Size>");
             sb.append("<InfoHash>").append(Base64.encode(infoHash.getRoot())).append("</InfoHash>");
             sb.append("<ResultStatus>").append(resultStatus).append("</ResultStatus>");
+            sb.append("<ResultStatusString>").append(Util._t(EnumStrings.RESULT_STATES.get(resultStatus))).append("</ResultStatusString>");
             sb.append("<Sources>").append(sources).append("</Sources>");
             sb.append("</Result>");
         }
@@ -405,6 +414,7 @@ public class SearchServlet extends HttpServlet {
             sb.append("<B64>").append(sender.toBase64()).append("</B64>");
             sb.append("<Browse>").append(browse).append("</Browse>");
             sb.append("<Trust>").append(trustLevel.toString()).append("</Trust>");
+            sb.append("<TrustString>").append(Util._t(EnumStrings.TRUST_LEVELS.get(trustLevel))).append("</TrustString>");
             sb.append("<Browsing>").append(browsing).append("</Browsing>");
             if (comment != null)
                 sb.append("<Comment>").append(Util.escapeHTMLinXML(comment)).append("</Comment>");

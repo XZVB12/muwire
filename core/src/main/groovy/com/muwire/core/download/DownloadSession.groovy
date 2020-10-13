@@ -37,13 +37,19 @@ class DownloadSession {
     private final long fileLength
     private final Set<Integer> available
     private final MessageDigest digest
+    private final boolean browse, feed, chat
 
     private final AtomicLong dataSinceLastRead
 
     private MappedByteBuffer mapped
+    private boolean unclaim = true
+    private boolean steal
+    int piece, position
+    private long pieceStart, start, end
 
     DownloadSession(EventBus eventBus, String meB64, Pieces pieces, InfoHash infoHash, Endpoint endpoint, File file,
-        int pieceSize, long fileLength, Set<Integer> available, AtomicLong dataSinceLastRead) {
+        int pieceSize, long fileLength, Set<Integer> available, AtomicLong dataSinceLastRead,
+        boolean browse, boolean feed, boolean chat) {
         this.eventBus = eventBus
         this.meB64 = meB64
         this.pieces = pieces
@@ -54,6 +60,9 @@ class DownloadSession {
         this.fileLength = fileLength
         this.available = available
         this.dataSinceLastRead = dataSinceLastRead
+        this.browse = browse
+        this.feed = feed
+        this.chat = chat
         try {
             digest = MessageDigest.getInstance("SHA-256")
         } catch (NoSuchAlgorithmException impossible) {
@@ -61,13 +70,13 @@ class DownloadSession {
             System.exit(1)
         }
     }
-
+    
     /**
      * @return if the request will proceed.  The only time it may not
      * is if all the pieces have been claimed by other sessions.
      * @throws IOException
      */
-    public boolean request() throws IOException {
+    public boolean sendRequest() throws IOException {
         OutputStream os = endpoint.getOutputStream()
         InputStream is = endpoint.getInputStream()
 
@@ -78,25 +87,49 @@ class DownloadSession {
             pieceAndPosition = pieces.claim(new HashSet<>(available))
         if (pieceAndPosition == null)
             return false
-        int piece = pieceAndPosition[0]
-        int position = pieceAndPosition[1]
-        boolean steal = pieceAndPosition[2] == 1
-        boolean unclaim = true
+            
+        piece = pieceAndPosition[0]
+        position = pieceAndPosition[1]
+        steal = pieceAndPosition[2] == 1
+        
+        log.info("will request piece $piece from position $position steal $steal")
+        
+        pieceStart = piece * ((long)pieceSize)
+        end = Math.min(fileLength, pieceStart + pieceSize) - 1
+        start = pieceStart + position
 
-        log.info("will download piece $piece from position $position steal $steal")
-
-        long pieceStart = piece * ((long)pieceSize)
-        long end = Math.min(fileLength, pieceStart + pieceSize) - 1
-        long start = pieceStart + position
         String root = Base64.encode(infoHash.getRoot())
-
+        
+        boolean headersSent = false
         try {
             os.write("GET $root\r\n".getBytes(StandardCharsets.US_ASCII))
             os.write("Range: $start-$end\r\n".getBytes(StandardCharsets.US_ASCII))
             os.write("X-Persona: $meB64\r\n".getBytes(StandardCharsets.US_ASCII))
+            if (browse)
+                os.write("Browse: true\r\n".getBytes(StandardCharsets.US_ASCII))
+            if (feed)
+                os.write("Feed: true\r\n".getBytes(StandardCharsets.US_ASCII))
+            if (chat)
+                os.write("Chat: true\r\n".getBytes(StandardCharsets.US_ASCII))
             String xHave = DataUtil.encodeXHave(pieces.getDownloaded(), pieces.nPieces)
             os.write("X-Have: $xHave\r\n\r\n".getBytes(StandardCharsets.US_ASCII))
-            os.flush()
+            headersSent = true
+            return true
+        } finally {
+            if (!headersSent && !steal) 
+                pieces.unclaim(piece)
+        }
+    }
+
+    /**
+     * @return true if the response was consumed, false if it cannot be satisfied.
+     * @throws IOException
+     */
+    public boolean consumeResponse() throws IOException {
+        OutputStream os = endpoint.getOutputStream()
+        InputStream is = endpoint.getInputStream()
+
+        try {
             String codeString = readTillRN(is)
             int space = codeString.indexOf(' ')
             if (space > 0)
@@ -117,16 +150,7 @@ class DownloadSession {
             }
 
             // parse all headers
-            Map<String,String> headers = new HashMap<>()
-            String header
-            while((header = readTillRN(is)) != "" && headers.size() < Constants.MAX_HEADERS) {
-                int colon = header.indexOf(':')
-                if (colon == -1 || colon == header.length() - 1)
-                    throw new IOException("invalid header $header")
-                String key = header.substring(0, colon)
-                String value = header.substring(colon + 1)
-                headers[key] = value.trim()
-            }
+            Map<String,String> headers = DataUtil.readAllHeaders(is)
 
             // prase X-Alt if present
             if (headers.containsKey("X-Alt")) {
@@ -204,6 +228,8 @@ class DownloadSession {
                     pieces.markPartial(piece, 0)
                     throw new BadHashException("bad hash on piece $piece")
                 }
+                
+                eventBus.publish(new SourceVerifiedEvent(infoHash : infoHash, source : endpoint.destination))
             } finally {
                 try { channel?.close() } catch (IOException ignore) {}
                 DataUtil.tryUnmap(mapped)
