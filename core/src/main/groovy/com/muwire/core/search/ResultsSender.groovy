@@ -2,6 +2,7 @@ package com.muwire.core.search
 
 import com.muwire.core.SharedFile
 import com.muwire.core.chat.ChatServer
+import com.muwire.core.collections.CollectionManager
 import com.muwire.core.connection.Endpoint
 import com.muwire.core.connection.I2PConnector
 import com.muwire.core.filecert.CertificateManager
@@ -50,15 +51,17 @@ class ResultsSender {
     private final MuWireSettings settings
     private final CertificateManager certificateManager
     private final ChatServer chatServer
+    private final CollectionManager collectionManager
 
     ResultsSender(EventBus eventBus, I2PConnector connector, Persona me, MuWireSettings settings, 
-        CertificateManager certificateManager, ChatServer chatServer) {
+        CertificateManager certificateManager, ChatServer chatServer, CollectionManager collectionManager) {
         this.connector = connector;
         this.eventBus = eventBus
         this.me = me
         this.settings = settings
         this.certificateManager = certificateManager
         this.chatServer = chatServer
+        this.collectionManager = collectionManager
     }
 
     void sendResults(UUID uuid, SharedFile[] results, Destination target, boolean oobInfohash, boolean compressedResults) {
@@ -77,19 +80,24 @@ class ResultsSender {
                 if (it.getComment() != null) {
                     comment = DataUtil.readi18nString(Base64.decode(it.getComment()))
                 }
-                int certificates = certificateManager.getByInfoHash(new InfoHash(it.getRoot())).size()
+                InfoHash ih = new InfoHash(it.getRoot())
+                int certificates = certificateManager.getByInfoHash(ih).size()
+                Set<InfoHash> collections = collectionManager.collectionsForFile(ih)
                 def uiResultEvent = new UIResultEvent( sender : me,
                     name : it.getFile().getName(),
                     size : length,
-                    infohash : new InfoHash(it.getRoot()),
+                    infohash : ih,
                     pieceSize : pieceSize,
                     uuid : uuid,
                     browse : settings.browseFiles,
+                    browseCollections : settings.browseFiles,
                     sources : suggested,
                     comment : comment,
                     certificates : certificates,
                     chat : chatServer.isRunning() && settings.advertiseChat,
-                    feed : settings.fileFeed && settings.advertiseFeed
+                    messages : settings.allowMessages,
+                    feed : settings.fileFeed && settings.advertiseFeed,
+                    collections : collections
                     )
                 uiResultEvents << uiResultEvent
             }
@@ -112,7 +120,7 @@ class ResultsSender {
             try {
                 JsonOutput jsonOutput = new JsonOutput()
                 Endpoint endpoint = null;
-                if (!compressedResults) {
+                if (!compressedResults) { // TODO: deprecate this completely
                     try {
                         endpoint = connector.connect(target)
                         DataOutputStream os = new DataOutputStream(endpoint.getOutputStream())
@@ -120,8 +128,10 @@ class ResultsSender {
                         me.write(os)
                         os.writeShort((short)results.length)
                         results.each {
-                            int certificates = certificateManager.getByInfoHash(new InfoHash(it.getRoot())).size()
-                            def obj = sharedFileToObj(it, settings.browseFiles, certificates)
+                            InfoHash ih = new InfoHash(it.getRoot())
+                            int certificates = certificateManager.getByInfoHash(ih).size()
+                            Set<InfoHash> collections = collectionManager.collectionsForFile(ih)
+                            def obj = sharedFileToObj(it, settings.browseFiles, certificates, collections)
                             def json = jsonOutput.toJson(obj)
                             os.writeShort((short)json.length())
                             os.write(json.getBytes(StandardCharsets.US_ASCII))
@@ -131,6 +141,7 @@ class ResultsSender {
                         endpoint?.close()
                     }
                 } else {
+                    DataOutputStream dos = null
                     try {
                         endpoint = connector.connect(target)
                         OutputStream os = endpoint.getOutputStream()
@@ -141,17 +152,23 @@ class ResultsSender {
                         os.write("Chat: $chat\r\n".getBytes(StandardCharsets.US_ASCII))
                         boolean feed = settings.fileFeed && settings.advertiseFeed
                         os.write("Feed: $feed\r\n".getBytes(StandardCharsets.US_ASCII))
+                        boolean messages = settings.allowMessages
+                        os.write("Messages: $messages\r\n".getBytes(StandardCharsets.US_ASCII))
                         os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
-                        DataOutputStream dos = new DataOutputStream(new GZIPOutputStream(os))
+                        dos = new DataOutputStream(new GZIPOutputStream(os))
                         results.each { 
-                            int certificates = certificateManager.getByInfoHash(new InfoHash(it.getRoot())).size()
-                            def obj = sharedFileToObj(it, settings.browseFiles, certificates)
+                            InfoHash ih = new InfoHash(it.getRoot())
+                            int certificates = certificateManager.getByInfoHash(ih).size()
+                            Set<InfoHash> collections = collectionManager.collectionsForFile(ih)
+                            def obj = sharedFileToObj(it, settings.browseFiles, certificates, collections)
                             def json = jsonOutput.toJson(obj)
                             dos.writeShort((short)json.length())
                             dos.write(json.getBytes(StandardCharsets.US_ASCII))
                         }
-                        dos.close()
                     } finally {
+                        try {
+                            dos?.close()
+                        } catch (Exception ignore) {}
                         endpoint?.close()
                     }
                 }
@@ -161,7 +178,7 @@ class ResultsSender {
         }
     }
     
-    public static def sharedFileToObj(SharedFile sf, boolean browseFiles, int certificates) {
+    public static def sharedFileToObj(SharedFile sf, boolean browseFiles, int certificates, Set<InfoHash> collections) {
         byte [] name = sf.getFile().getName().getBytes(StandardCharsets.UTF_8)
         def baos = new ByteArrayOutputStream()
         def daos = new DataOutputStream(baos)
@@ -184,7 +201,9 @@ class ResultsSender {
             obj.comment = sf.getComment()
 
         obj.browse = browseFiles 
+        obj.browseCollections = browseFiles
         obj.certificates = certificates
+        obj.collections = collections.collect { Base64.encode(it.getRoot()) }
         obj
     }
 }

@@ -146,4 +146,34 @@ mvcGroups {
         view = 'com.muwire.gui.wizard.WizardView'
         controller = 'com.muwire.gui.wizard.WizardController'
     }
+    'collection-wizard' {
+        model = 'com.muwire.gui.CollectionWizardModel'
+        view = 'com.muwire.gui.CollectionWizardView'
+        controller = 'com.muwire.gui.CollectionWizardController'
+    }
+    'collections-tool' {
+        model = 'com.muwire.gui.CollectionsToolModel'
+        view = 'com.muwire.gui.CollectionsToolView'
+        controller = 'com.muwire.gui.CollectionsToolController'
+    }
+    'collection-tab' {
+        model = 'com.muwire.gui.CollectionTabModel'
+        view = 'com.muwire.gui.CollectionTabView'
+        controller = 'com.muwire.gui.CollectionTabController'
+    }
+    'collection-warning' {
+        model = "com.muwire.gui.CollectionWarningModel"
+        view = "com.muwire.gui.CollectionWarningView"
+        controller = "com.muwire.gui.CollectionWarningController"
+    }
+    'new-message' {
+        model = "com.muwire.gui.NewMessageModel"
+        view = "com.muwire.gui.NewMessageView"
+        controller = "com.muwire.gui.NewMessageController"
+    }
+    'add-contact' {
+        model = "com.muwire.gui.AddContactModel"
+        view = "com.muwire.gui.AddContactView"
+        controller = "com.muwire.gui.AddContactController"
+    }
 }

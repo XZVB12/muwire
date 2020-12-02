@@ -18,6 +18,7 @@ class UISettings {
     boolean excludeLocalResult
     boolean showSearchHashes
     boolean closeWarning
+    boolean collectionWarning
     boolean certificateWarning
     boolean exitOnClose
     boolean clearUploads
@@ -26,6 +27,7 @@ class UISettings {
     int maxChatLines
     Set<String> searchHistory
     Set<String> openTabs
+    boolean messageNotifications
     
     UISettings(Properties props) {
         lnf = props.getProperty("lnf", "system")
@@ -40,6 +42,7 @@ class UISettings {
         fontSize = Integer.parseInt(props.getProperty("fontSize","12"))
         fontStyle = Integer.parseInt(props.getProperty("fontStyle", String.valueOf(Font.PLAIN)))
         closeWarning = Boolean.parseBoolean(props.getProperty("closeWarning","true"))
+        collectionWarning = Boolean.parseBoolean(props.getProperty("collectionWarning", "true"))
         certificateWarning = Boolean.parseBoolean(props.getProperty("certificateWarning","true"))
         exitOnClose = Boolean.parseBoolean(props.getProperty("exitOnClose","false"))
         clearUploads = Boolean.parseBoolean(props.getProperty("clearUploads","false"))
@@ -52,6 +55,8 @@ class UISettings {
         
         searchHistory = DataUtil.readEncodedSet(props, "searchHistory")
         openTabs = DataUtil.readEncodedSet(props, "openTabs")
+        
+        messageNotifications = Boolean.parseBoolean(props.getProperty("messageNotifications","true"))
     }
 
     void write(OutputStream out) throws IOException {
@@ -66,6 +71,7 @@ class UISettings {
         props.setProperty("autoFontSize", String.valueOf(autoFontSize))
         props.setProperty("fontSize", String.valueOf(fontSize))
         props.setProperty("closeWarning", String.valueOf(closeWarning))
+        props.setProperty("collectionWarning", String.valueOf(collectionWarning))
         props.setProperty("certificateWarning", String.valueOf(certificateWarning))
         props.setProperty("exitOnClose", String.valueOf(exitOnClose))
         props.setProperty("clearUploads", String.valueOf(clearUploads))
@@ -81,6 +87,8 @@ class UISettings {
 
         DataUtil.writeEncodedSet(searchHistory, "searchHistory", props)
         DataUtil.writeEncodedSet(openTabs, "openTabs", props)
+        
+        props.setProperty("messageNotifications", String.valueOf(messageNotifications))
 
         props.store(out, "UI Properties")
     }

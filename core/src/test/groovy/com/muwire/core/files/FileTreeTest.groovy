@@ -1,9 +1,26 @@
 package com.muwire.core.files
 
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 
 class FileTreeTest {
-    
+
+    @Before
+    @After
+    public void cleanup() {
+        File a = new File("a")
+        File b = new File("b")
+        [a,b].each {
+            if (it.exists()) {
+                if (it.isDirectory())
+                    it.deleteDir()
+                else
+                    it.delete()
+            }
+        }
+    }
+
     @Test
     public void testRemoveEmtpyDirs() {
         File a = new File("a")
@@ -108,10 +125,13 @@ class FileTreeTest {
         }
         
         File a = new File("a")
+        a.delete()
         a.createNewFile()
         File b = new File("b")
+        b.delete()
         b.mkdir()
         File c = new File(b, "c")
+        c.delete()
         c.createNewFile()
         
         FileTree<String> tree = new FileTree<>()
@@ -133,5 +153,33 @@ class FileTreeTest {
         assert directories.isEmpty()
         assert values.size() == 1
         assert values.contains("c")
+    }
+    
+    @Test
+    public void testCommonAncestor() {
+        File a = new File("a")
+        File b = new File(a,"b")
+        File c = new File(b,"c")
+        File d = new File(b,"d")
+        
+        a.delete()
+        b.delete()
+        c.delete()
+        d.delete()
+        
+        a.mkdir()
+        b.mkdir()
+        c.createNewFile()
+        d.createNewFile()
+        
+        FileTree<Void> tree = new FileTree<>()
+        tree.add(a, null)
+        tree.add(b, null)
+        tree.add(c, null)
+        tree.add(d, null)
+        
+        File common = tree.commonAncestor()
+        
+        assert common == b
     }
 }

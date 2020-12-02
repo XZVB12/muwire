@@ -101,12 +101,28 @@ class SearchTabController {
         if (sender == null)
             return
 
-        String groupId = sender.getHumanReadableName() + "-browse"
+        String groupId = UUID.randomUUID().toString()
         Map<String,Object> params = new HashMap<>()
         params['host'] = sender
         params['core'] = core
 
-        mvcGroup.createMVCGroup("browse", groupId, params)
+        mvcGroup.parentGroup.createMVCGroup("browse", groupId, params)
+    }
+    
+    @ControllerAction
+    void browseCollections() {
+        def sender = view.selectedSender()
+        if (sender == null)
+            return
+        
+        UUID uuid = UUID.randomUUID()
+        def params = [:]
+        params['fileName'] = sender.getHumanReadableName()
+        params['eventBus'] = mvcGroup.parentGroup.model.core.eventBus
+        params['everything'] = true 
+        params['uuid'] = uuid
+        params['host'] = sender
+        mvcGroup.parentGroup.createMVCGroup("collection-tab", uuid.toString(), params)
     }
     
     @ControllerAction
@@ -162,5 +178,41 @@ class SearchTabController {
         params['name'] = event.getName()
         params['core'] = core
         mvcGroup.createMVCGroup("fetch-certificates", params)
+    }
+    
+    @ControllerAction
+    void viewCollections() {
+        UIResultEvent event = view.getSelectedResult()
+        if (event == null || event.collections.isEmpty())
+            return
+            
+        UUID uuid = UUID.randomUUID()
+        def params = [:]
+        params['fileName'] = event.name
+        params['eventBus'] = mvcGroup.parentGroup.model.core.eventBus
+        params['infoHashes'] = event.collections.collect()
+        params['uuid'] = uuid
+        params['host'] = event.sender
+        mvcGroup.parentGroup.createMVCGroup("collection-tab", uuid.toString(), params)
+    }
+    
+    @ControllerAction
+    void message() {
+        Persona recipient = view.selectedSender()
+        if (recipient == null)
+            return
+        
+        def params = [:]
+        params.recipients = new HashSet<>(Collections.singletonList(recipient))
+        params.core = model.core
+        mvcGroup.parentGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void copyFullID() {
+        Persona sender = view.selectedSender()
+        if (sender == null)
+            return
+        CopyPasteSupport.copyToClipboard(sender.toBase64())
     }
 }

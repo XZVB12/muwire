@@ -18,8 +18,11 @@ import groovy.mock.interceptor.MockFor
 import groovy.mock.interceptor.StubFor
 import net.i2p.data.Destination
 
+import java.util.function.Predicate
+
 class HostCacheTest {
 
+    def filter = {true} as Predicate
 
     File persist
     HostCache cache
@@ -53,7 +56,7 @@ class HostCacheTest {
     private void initMocks() {
         trust = trustMock.proxyInstance()
         settings = settingsMock.proxyInstance()
-        cache = new HostCache(trust, persist, 100, settings, new Destination())
+        cache = new SimpleHostCache(trust, persist, 100, settings, new Destination())
         cache.start()
         Thread.sleep(150)
     }
@@ -61,7 +64,7 @@ class HostCacheTest {
     @Test
     void testEmpty() {
         initMocks()
-        assert cache.getHosts(5).size() == 0
+        assert cache.getHosts(5, filter).size() == 0
         assert cache.getGoodHosts(5).size() == 0
     }
 
@@ -81,7 +84,7 @@ class HostCacheTest {
 
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
 
-        def rv = cache.getHosts(5)
+        def rv = cache.getHosts(5, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
 
@@ -103,7 +106,7 @@ class HostCacheTest {
         initMocks()
 
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
-        assert cache.getHosts(5).size() == 0
+        assert cache.getHosts(5, filter).size() == 0
     }
 
     @Test
@@ -121,7 +124,7 @@ class HostCacheTest {
         initMocks()
 
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
-        assert cache.getHosts(5).size() == 0
+        assert cache.getHosts(5, filter).size() == 0
     }
 
     @Test
@@ -145,7 +148,7 @@ class HostCacheTest {
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest2))
 
-        def rv = cache.getHosts(1)
+        def rv = cache.getHosts(1, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1) || rv.contains(destinations.dest2)
     }
@@ -174,7 +177,7 @@ class HostCacheTest {
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.FAILED))
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.FAILED))
 
-        assert cache.getHosts(5).size() == 0
+        assert cache.getHosts(5, filter).size() == 0
     }
 
     @Test
@@ -198,7 +201,7 @@ class HostCacheTest {
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.FAILED))
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.SUCCESSFUL))
 
-        def rv = cache.getHosts(5)
+        def rv = cache.getHosts(5, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
 
@@ -225,7 +228,7 @@ class HostCacheTest {
         def endpoint = new Endpoint(destinations.dest1, null, null, null)
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.SUCCESSFUL))
 
-        def rv = cache.getHosts(5)
+        def rv = cache.getHosts(5, filter)
         def rv2 = cache.getGoodHosts(5)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
@@ -233,7 +236,7 @@ class HostCacheTest {
 
         cache.onConnectionEvent( new ConnectionEvent(endpoint: endpoint, status: ConnectionAttemptStatus.FAILED))
 
-        rv = cache.getHosts(5)
+        rv = cache.getHosts(5, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
         assert cache.getGoodHosts(5).size() == 0
@@ -259,7 +262,7 @@ class HostCacheTest {
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
         cache.onHostDiscoveredEvent(new HostDiscoveredEvent(destination: destinations.dest1))
 
-        def rv = cache.getHosts(5)
+        def rv = cache.getHosts(5, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
     }
@@ -313,7 +316,7 @@ class HostCacheTest {
         settingsMock.ignore.getHostHopelessPurgeInterval { 0 }
         
         initMocks()
-        def rv = cache.getHosts(5)
+        def rv = cache.getHosts(5, filter)
         assert rv.size() == 1
         assert rv.contains(destinations.dest1)
 

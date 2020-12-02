@@ -8,6 +8,7 @@ import griffon.metadata.ArtifactProviderFor
 import net.i2p.crypto.DSAEngine
 import net.i2p.data.Base64
 import net.i2p.data.Signature
+import net.i2p.data.i2cp.MessageStatusMessage
 
 import java.awt.Desktop
 import java.awt.Toolkit
@@ -20,11 +21,15 @@ import javax.inject.Inject
 import javax.swing.JOptionPane
 import javax.swing.JTable
 
+import com.muwire.core.Constants
 import com.muwire.core.Core
 import com.muwire.core.InfoHash
 import com.muwire.core.Persona
 import com.muwire.core.SharedFile
 import com.muwire.core.SplitPattern
+import com.muwire.core.collections.FileCollection
+import com.muwire.core.collections.UICollectionDeletedEvent
+import com.muwire.core.collections.UIDownloadCollectionEvent
 import com.muwire.core.download.Downloader
 import com.muwire.core.download.UIDownloadCancelledEvent
 import com.muwire.core.download.UIDownloadPausedEvent
@@ -39,15 +44,22 @@ import com.muwire.core.filefeeds.UIFeedUpdateEvent
 import com.muwire.core.filefeeds.UIFilePublishedEvent
 import com.muwire.core.filefeeds.UIFileUnpublishedEvent
 import com.muwire.core.files.FileUnsharedEvent
+import com.muwire.core.messenger.MWMessage
+import com.muwire.core.messenger.MWMessageAttachment
+import com.muwire.core.messenger.UIDownloadAttachmentEvent
+import com.muwire.core.messenger.UIMessageDeleteEvent
+import com.muwire.core.messenger.UIMessageReadEvent
 import com.muwire.core.search.QueryEvent
 import com.muwire.core.search.SearchEvent
 import com.muwire.core.trust.RemoteTrustList
 import com.muwire.core.trust.TrustEvent
 import com.muwire.core.trust.TrustLevel
+import com.muwire.core.trust.TrustService.TrustEntry
 import com.muwire.core.trust.TrustSubscriptionEvent
 import com.muwire.core.upload.HashListUploader
 import com.muwire.core.upload.Uploader
 import com.muwire.core.util.DataUtil
+import com.muwire.gui.MainFrameModel.MWMessageStatus
 
 @ArtifactProviderFor(GriffonController)
 class MainFrameController {
@@ -118,13 +130,15 @@ class MainFrameController {
         def searchEvent
         byte [] payload
         if (hashSearch) {
-            searchEvent = new SearchEvent(searchHash : root, uuid : uuid, oobInfohash: true, compressedResults : true, persona : core.me)
+            searchEvent = new SearchEvent(searchHash : root, uuid : uuid, oobInfohash: true,
+                compressedResults : true, persona : core.me, collections : core.muOptions.searchCollections)
             payload = root
         } else {
             def nonEmpty = SplitPattern.termify(search)
             payload = String.join(" ",nonEmpty).getBytes(StandardCharsets.UTF_8)
             searchEvent = new SearchEvent(searchTerms : nonEmpty, uuid : uuid, oobInfohash: true,
-            searchComments : core.muOptions.searchComments, compressedResults : true, persona : core.me)
+            searchComments : core.muOptions.searchComments, compressedResults : true, persona : core.me,
+            collections : core.muOptions.searchCollections)
         }
         boolean firstHop = core.muOptions.allowUntrusted || core.muOptions.searchExtraHop
 
@@ -232,6 +246,13 @@ class MainFrameController {
          model.clearButtonEnabled = false
 
     }
+    
+    @ControllerAction
+    void addContact() {
+        def params = [:]
+        params.core = core
+        mvcGroup.createMVCGroup("add-contact", params)
+    }
 
     private void markTrust(String tableName, TrustLevel level, def list) {
         int row = view.getSelectedTrustTablesRow(tableName)
@@ -336,11 +357,30 @@ class MainFrameController {
             return
         Persona p = model.trusted[row].persona
         
-        String groupId = p.getHumanReadableName() + "-browse"
+        String groupId = UUID.randomUUID().toString()
         def params = [:]
         params['host'] = p
         params['core'] = model.core
         mvcGroup.createMVCGroup("browse",groupId,params)
+        view.showSearchWindow.call()
+    }
+    
+    @ControllerAction
+    void browseCollectionsFromTrusted() {
+        int row = view.getSelectedTrustTablesRow("trusted-table")
+        if (row < 0)
+            return
+        Persona p = model.trusted[row].persona
+        
+        UUID uuid = UUID.randomUUID()
+        def params = [:]
+        params.fileName = p.getHumanReadableName()
+        params.eventBus = core.eventBus
+        params.everything = true
+        params.uuid = uuid
+        params.host = p
+        mvcGroup.createMVCGroup("collection-tab", uuid.toString(), params)
+        view.showSearchWindow.call()
     }
     
     @ControllerAction
@@ -361,11 +401,31 @@ class MainFrameController {
             return
         Persona p = u.getDownloaderPersona()
 
-        String groupId = p.getHumanReadableName() + "-browse"
+        String groupId = UUID.randomUUID().toString()
         def params = [:]
         params['host'] = p
         params['core'] = model.core
         mvcGroup.createMVCGroup("browse",groupId,params)
+        view.showSearchWindow.call()
+    }
+    
+    @ControllerAction
+    void browseCollectionsFromUpload() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        Persona p = u.getDownloaderPersona()
+        
+        UUID uuid = UUID.randomUUID()
+        def params = [:]
+        params.fileName = p.getHumanReadableName()
+        params.eventBus = core.eventBus
+        params.host = p
+        params.uuid = uuid
+        params.everything = true
+        
+        mvcGroup.createMVCGroup("collection-tab", uuid.toString(), params)
+        view.showSearchWindow.call()
     }
     
     @ControllerAction
@@ -396,11 +456,31 @@ class MainFrameController {
     }
 
     void unshareSelectedFile() {
-        def sf = view.selectedSharedFiles()
-        if (sf == null)
+        def sfs = view.selectedSharedFiles()
+        if (sfs == null)
             return
-        sf.each {  
-            core.eventBus.publish(new FileUnsharedEvent(unsharedFile : it))
+        sfs.each { SharedFile sf ->
+            
+            if (view.settings.collectionWarning) {
+                Set<InfoHash> collectionsInfoHashes = core.collectionManager.collectionsForFile(new InfoHash(sf.root))
+                if (collectionsInfoHashes != null) {
+                    String[] affected = collectionsInfoHashes.collect({core.collectionManager.getByInfoHash(it)}).collect{it.name}.toArray(new String[0])
+
+                    boolean [] answer = new boolean[1]
+                    def props = [:]
+                    props.collections = affected
+                    props.answer = answer
+                    props.fileName = sf.file.getName()
+                    props.settings = view.settings
+                    props.home = core.home
+                    def mvc = mvcGroup.createMVCGroup("collection-warning", props)
+                    mvc.destroy()
+                    if (!answer[0])
+                        return
+                }
+            }
+            
+            core.eventBus.publish(new FileUnsharedEvent(unsharedFile : sf))
         }
     }
     
@@ -646,6 +726,254 @@ class MainFrameController {
         params['infoHash'] = item.getInfoHash()
         params['name'] = item.getName()
         mvcGroup.createMVCGroup("fetch-certificates", params)
+    }
+    
+    @ControllerAction
+    void collection() {
+        def files = view.selectedSharedFiles()
+
+        if (files != null && files.size() > Constants.COLLECTION_MAX_ITEMS) {
+            JOptionPane.showMessageDialog(null, trans("CREATE_COLLECTION_MAX_FILES", Constants.COLLECTION_MAX_ITEMS, files.size()),
+                trans("CREATE_COLLECTION_MAX_FILES_TITLE"), JOptionPane.WARNING_MESSAGE)
+            return
+        }
+        if (files == null)
+            files = new ArrayList<>()        
+        def params = [:]
+        params['files'] = files
+        params['spk'] = model.core.spk
+        params['me'] = model.core.me
+        params['eventBus'] = model.core.eventBus
+        
+        mvcGroup.createMVCGroup("collection-wizard", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void viewCollectionComment() {
+        int row = view.selectedCollectionRow()
+        if (row < 0)
+            return
+        FileCollection collection = model.localCollections.get(row)
+
+        def params = [:]
+        params['text'] = collection.comment
+        mvcGroup.createMVCGroup("show-comment", params)
+    }
+    
+    @ControllerAction
+    void copyCollectionHash() {
+        int row = view.selectedCollectionRow()
+        if (row < 0)
+            return
+        FileCollection collection = model.localCollections.get(row)
+        
+        String b64 = Base64.encode(collection.getInfoHash().getRoot())
+        
+        StringSelection selection = new StringSelection(b64)
+        def clipboard = Toolkit.getDefaultToolkit().getSystemClipboard()
+        clipboard.setContents(selection, null)
+    }
+    
+    @ControllerAction
+    void deleteCollection() {
+        int row = view.selectedCollectionRow()
+        if (row < 0)
+            return
+        FileCollection collection = model.localCollections.get(row)
+        UICollectionDeletedEvent e = new UICollectionDeletedEvent(collection : collection)
+        model.core.eventBus.publish(e)
+        model.localCollections.remove(row)
+        view.collectionsTable.model.fireTableDataChanged()
+        model.collectionFiles.clear()
+        view.collectionFilesTable.model.fireTableDataChanged()
+    }
+    
+    @ControllerAction
+    void viewItemComment() {
+        int row = view.selectedItemRow()
+        if (row < 0)
+            return
+        SharedFile sf = model.collectionFiles.get(row)
+        
+        def params = [:]
+        params['text'] = DataUtil.readi18nString(Base64.decode(sf.getComment()))
+        mvcGroup.createMVCGroup("show-comment", params)
+    }
+    
+    @ControllerAction
+    void showCollectionTool() {
+        int row = view.selectedCollectionRow()
+        if (row < 0)
+            return
+        FileCollection collection = model.localCollections.get(row)
+        
+        def params = [:]
+        params['collection'] = collection
+        mvcGroup.createMVCGroup("collections-tool", params)
+    }
+    
+    @ControllerAction
+    void messageReply() {
+        int row = view.selectedMessageHeader()
+        if (row < 0)
+            return
+        MWMessage msg = model.messageHeaders.get(row).message
+        
+        def params = [:]
+        params.reply = msg
+        params.core = core
+        params.recipients = new HashSet<>(Collections.singletonList(msg.sender))
+        mvcGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void messageReplyAll() {
+        int row = view.selectedMessageHeader()
+        if (row < 0)
+            return
+        MWMessage msg = model.messageHeaders.get(row).message
+
+        Set<Persona> all = new HashSet<>()
+        all.add(msg.sender)
+        all.addAll(msg.recipients)
+
+        def params = [:]
+        params.reply = msg
+        params.core = core
+        params.recipients = all
+        mvcGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void messageDelete() {
+        int row = view.selectedMessageHeader()
+        if (row < 0)
+            return
+        MWMessage msg = model.messageHeaders.get(row).message
+        model.deleteMessage(msg)
+        core.eventBus.publish(new UIMessageDeleteEvent(message : msg, folder : model.folderIdx))
+    }
+    
+    @ControllerAction
+    void messageCompose() {
+        def params = [:]
+        params.recipients = new HashSet<>()
+        params.core = core
+        mvcGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void messageComposeFromUpload() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        Persona p = u.getDownloaderPersona()
+        
+        def params = [:]
+        params.recipients = new HashSet<>(Collections.singletonList(p))
+        params.core = core
+        mvcGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void messageFromTrusted() {
+        int row = view.getSelectedTrustTablesRow("trusted-table")
+        if (row < 0)
+            return
+        TrustEntry te = model.trusted[row]
+        
+        def params = [:]
+        params.recipients = new HashSet<>(Collections.singletonList(te.persona))
+        params.core = core
+        mvcGroup.createMVCGroup("new-message", UUID.randomUUID().toString(), params)
+    }
+    
+    @ControllerAction
+    void downloadAttachment() {
+        List selected = view.selectedMessageAttachments()
+        if (selected.isEmpty())
+            return
+        
+        doDownloadAttachments(selected)    
+    }
+    
+    @ControllerAction
+    void downloadAllAttachments() {
+        doDownloadAttachments(model.messageAttachments)
+    }
+    
+    void markMessageRead(MWMessageStatus status) {
+        if (status.status) {
+            status.status = false
+            model.core.eventBus.publish(new UIMessageReadEvent(message : status.message))
+        }
+    }
+    
+    @ControllerAction
+    void copyIdFromUploads() {
+        Uploader u = view.selectedUploader()
+        if (u == null)
+            return
+        CopyPasteSupport.copyToClipboard(u.getDownloaderPersona().toBase64())
+    }
+    
+    @ControllerAction
+    void copyIdFromTrusted() {
+        int row = view.getSelectedTrustTablesRow("trusted-table")
+        if (row < 0)
+            return
+        TrustEntry te = model.trusted.get(row)
+        CopyPasteSupport.copyToClipboard(te.persona.toBase64())
+    }
+    
+    @ControllerAction
+    void copyIdFromUntrusted() {
+        int row = view.getSelectedTrustTablesRow("distrusted-table")
+        if (row < 0)
+            return
+        TrustEntry te = model.distrusted.get(row)
+        CopyPasteSupport.copyToClipboard(te.persona.toBase64())
+    }
+    
+    @ControllerAction
+    void copyIdFromMessage() {
+        int row = view.selectedMessageHeader()
+        if (row < 0)
+            return
+        MWMessageStatus status = model.messageHeaders.get(row)
+        CopyPasteSupport.copyToClipboard(status.message.sender.toBase64())
+    }
+    
+    @ControllerAction
+    void copyIdFromFeed() {
+        Feed feed = view.selectedFeed()
+        if (feed == null)
+            return
+        CopyPasteSupport.copyToClipboard(feed.getPublisher().toBase64())
+    }
+    
+    private void doDownloadAttachments(List attachments) {
+        int messageRow = view.selectedMessageHeader()
+        if (messageRow < 0)
+            return
+
+        MWMessage message = model.messageHeaders.get(messageRow).message
+        attachments.each {
+            if (it instanceof MWMessageAttachment)
+                core.eventBus.publish(new UIDownloadAttachmentEvent(attachment : it, sender : message.sender))
+            else {
+                def event = new UIDownloadCollectionEvent(
+                    collection : it,
+                    items : it.getFiles(),
+                    host : message.sender,
+                    infoHash : it.getInfoHash(),
+                    full : true
+                    )
+                core.eventBus.publish(event)
+            }
+        }
+        
+        view.showDownloadsWindow.call()
     }
     
     void startChat(Persona p) {

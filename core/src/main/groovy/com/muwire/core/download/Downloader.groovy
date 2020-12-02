@@ -26,6 +26,7 @@ import com.muwire.core.util.DataUtil
 import com.muwire.core.util.BandwidthCounter
 
 import groovy.util.logging.Log
+import net.i2p.data.Base64
 import net.i2p.data.Destination
 import net.i2p.util.ConcurrentHashSet
 
@@ -49,7 +50,7 @@ public class Downloader {
     private final File file
     private final Pieces pieces
     private final long length
-    private InfoHash infoHash
+    private InfoHash infoHash, collectionInfoHash
     private final int pieceSize
     private final I2PConnector connector
     private final Set<Destination> destinations
@@ -76,7 +77,7 @@ public class Downloader {
     private volatile BandwidthCounter bwCounter = new BandwidthCounter(0)
 
     public Downloader(EventBus eventBus, DownloadManager downloadManager, ChatServer chatServer,
-        Persona me, File file, long length, InfoHash infoHash,
+        Persona me, File file, long length, InfoHash infoHash, InfoHash collectionInfoHash,
         int pieceSizePow2, I2PConnector connector, Set<Destination> destinations,
         File incompletes, Pieces pieces, int maxFailures) {
         this.eventBus = eventBus
@@ -85,12 +86,15 @@ public class Downloader {
         this.chatServer = chatServer
         this.file = file
         this.infoHash = infoHash
+        this.collectionInfoHash = collectionInfoHash
         this.length = length
         this.connector = connector
         this.destinations = destinations
         this.incompletes = incompletes
-        this.piecesFile = new File(incompletes, file.getName()+".pieces")
-        this.incompleteFile = new File(incompletes, file.getName()+".part")
+        
+        String ih64 = Base64.encode(infoHash.getRoot())
+        this.piecesFile = new File(incompletes, file.getName()+"${ih64}.pieces")
+        this.incompleteFile = new File(incompletes, file.getName()+"${ih64}.part")
         this.pieceSizePow2 = pieceSizePow2
         this.pieceSize = 1 << pieceSizePow2
         this.pieces = pieces
@@ -404,6 +408,7 @@ public class Downloader {
                 boolean browse = downloadManager.muSettings.browseFiles
                 boolean feed = downloadManager.muSettings.fileFeed && downloadManager.muSettings.advertiseFeed
                 boolean chat = chatServer.isRunning() && downloadManager.muSettings.advertiseChat
+                boolean message = downloadManager.muSettings.allowMessages
                 
                 Set<Integer> queuedPieces = new HashSet<>()
                 boolean requestPerformed
@@ -414,7 +419,7 @@ public class Downloader {
                             available.removeAll(queuedPieces)
                             def currentSession = new DownloadSession(eventBus, me.toBase64(), pieces, getInfoHash(),
                                     endpoint, incompleteFile, pieceSize, length, available, dataSinceLastRead,
-                                    browse, feed, chat)
+                                    browse, feed, chat, message)
                             if (currentSession.sendRequest()) {
                                 queuedPieces.add(currentSession.piece)
                                 sessionQueue.addLast(currentSession)
@@ -428,7 +433,7 @@ public class Downloader {
                     available.removeAll(queuedPieces)
                     def nextSession = new DownloadSession(eventBus, me.toBase64(), pieces, getInfoHash(),
                                 endpoint, incompleteFile, pieceSize, length, available, dataSinceLastRead,
-                                browse, feed, chat)
+                                browse, feed, chat, message)
                     if (nextSession.sendRequest()) {
                         sessionQueue.addLast(nextSession)
                         queuedPieces.add(nextSession.piece)
@@ -469,7 +474,8 @@ public class Downloader {
                         new FileDownloadedEvent(
                             downloadedFile : new DownloadedFile(file.getCanonicalFile(), getInfoHash().getRoot(), pieceSizePow2, successfulDestinations),
                         downloader : Downloader.this,
-                        infoHash: getInfoHash()))
+                        infoHash: getInfoHash(),
+                        collectionInfoHash : collectionInfoHash))
 
                 }
                 endpoint?.close()

@@ -9,6 +9,15 @@ import com.muwire.core.MuWireSettings
 import com.muwire.core.SharedFile
 
 class HasherService {
+    
+    private static final ThreadLocal<FileHasher> HASHER_TL = new ThreadLocal<FileHasher>() {
+
+        @Override
+        protected FileHasher initialValue() {
+            return new FileHasher()
+        }
+        
+    } 
 
     final FileHasher hasher
     final EventBus eventBus
@@ -17,7 +26,7 @@ class HasherService {
     final MuWireSettings settings
     Executor executor
 
-    HasherService(FileHasher hasher, EventBus eventBus, FileManager fileManager, MuWireSettings settings) {
+    HasherService(EventBus eventBus, FileManager fileManager, MuWireSettings settings) {
         this.hasher = hasher
         this.eventBus = eventBus
         this.fileManager = fileManager
@@ -25,7 +34,7 @@ class HasherService {
     }
 
     void start() {
-        executor = Executors.newSingleThreadExecutor()
+        executor = Executors.newFixedThreadPool((int)Math.max(1d, Runtime.getRuntime().availableProcessors() / 2d ))
     }
 
     void onFileSharedEvent(FileSharedEvent evt) {
@@ -35,6 +44,8 @@ class HasherService {
         if (fileManager.fileToSharedFile.containsKey(canonical)) 
             return
         if (canonical.isFile() && fileManager.negativeTree.fileToNode.containsKey(canonical))
+            return
+        if (canonical.getName().endsWith(".mwcollection"))
             return
         if (canonical.getName().endsWith(".mwcomment")) { 
             if (canonical.length() <= Constants.MAX_COMMENT_LENGTH)
@@ -63,7 +74,7 @@ class HasherService {
                 eventBus.publish new FileHashedEvent(error: "$f is too large to be shared ${f.length()}")
             } else {
                 eventBus.publish new FileHashingEvent(hashingFile: f)
-                def hash = hasher.hashFile f
+                def hash = HASHER_TL.get().hashFile f
                 eventBus.publish new FileHashedEvent(sharedFile: new SharedFile(f, hash.getRoot(), FileHasher.getPieceSize(f.length())),
                     infoHash : hash)
             }

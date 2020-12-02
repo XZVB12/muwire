@@ -16,9 +16,12 @@ class UIResultEvent extends Event {
     int pieceSize
     String comment
     boolean browse
+    boolean browseCollections
     int certificates
     boolean chat
     boolean feed
+    boolean messages
+    Set<InfoHash> collections
     
     @Override
     public String toString() {

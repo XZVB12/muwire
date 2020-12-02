@@ -5,6 +5,7 @@ import com.muwire.core.files.PersisterFolderService
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.function.Supplier
 import java.util.logging.Level
 import java.util.zip.ZipException
 
@@ -14,6 +15,12 @@ import com.muwire.core.chat.ChatMessageEvent
 import com.muwire.core.chat.ChatServer
 import com.muwire.core.chat.UIConnectChatEvent
 import com.muwire.core.chat.UIDisconnectChatEvent
+import com.muwire.core.collections.CollectionManager
+import com.muwire.core.collections.CollectionsClient
+import com.muwire.core.collections.UICollectionCreatedEvent
+import com.muwire.core.collections.UICollectionDeletedEvent
+import com.muwire.core.collections.UICollectionFetchEvent
+import com.muwire.core.collections.UIDownloadCollectionEvent
 import com.muwire.core.connection.ConnectionAcceptor
 import com.muwire.core.connection.ConnectionEstablisher
 import com.muwire.core.connection.ConnectionEvent
@@ -67,9 +74,17 @@ import com.muwire.core.files.DirectoryUnsharedEvent
 import com.muwire.core.files.DirectoryWatchedEvent
 import com.muwire.core.files.DirectoryWatcher
 import com.muwire.core.hostcache.CacheClient
+import com.muwire.core.hostcache.H2HostCache
 import com.muwire.core.hostcache.HostCache
 import com.muwire.core.hostcache.HostDiscoveredEvent
+import com.muwire.core.hostcache.SimpleHostCache
 import com.muwire.core.mesh.MeshManager
+import com.muwire.core.messenger.MessageReceivedEvent
+import com.muwire.core.messenger.Messenger
+import com.muwire.core.messenger.UIDownloadAttachmentEvent
+import com.muwire.core.messenger.UIMessageDeleteEvent
+import com.muwire.core.messenger.UIMessageEvent
+import com.muwire.core.messenger.UIMessageReadEvent
 import com.muwire.core.search.BrowseManager
 import com.muwire.core.search.QueryEvent
 import com.muwire.core.search.ResponderCache
@@ -132,11 +147,13 @@ public class Core {
     final DownloadManager downloadManager
     private final DirectoryWatcher directoryWatcher
     final FileManager fileManager
+    final CollectionManager collectionManager
     final UploadManager uploadManager
     final ContentManager contentManager
     final CertificateManager certificateManager
     final ChatServer chatServer
     final ChatManager chatManager
+    final Messenger messenger
     final FeedManager feedManager
     private final FeedClient feedClient
     private final WatchedDirectoryConverter watchedDirectoryConverter
@@ -204,6 +221,7 @@ public class Core {
             routerProps.setProperty("i2np.inboundKBytesPerSecond", String.valueOf(props.inBw))
             routerProps.setProperty("i2np.outboundKBytesPerSecond", String.valueOf(props.outBw))
             routerProps.setProperty("i2cp.disableInterface", "true")
+            routerProps.setProperty("i2np.ntcp.nodelay", "true")
             routerProps.setProperty("i2np.ntcp.port", i2pOptions["i2np.ntcp.port"])
             routerProps.setProperty("i2np.udp.port", i2pOptions["i2np.udp.port"])
             routerProps.setProperty("i2np.udp.internalPort", i2pOptions["i2np.udp.port"])
@@ -285,7 +303,19 @@ public class Core {
         eventBus.register(DirectoryUnsharedEvent.class, fileManager)
         eventBus.register(UICommentEvent.class, fileManager)
         eventBus.register(SideCarFileEvent.class, fileManager)
-
+        
+        log.info("initializing collection manager")
+        collectionManager = new CollectionManager(eventBus, fileManager, home)
+        eventBus.with { 
+            register(AllFilesLoadedEvent.class, collectionManager)
+            register(UICollectionCreatedEvent.class, collectionManager)
+            register(UICollectionDeletedEvent.class, collectionManager)
+            register(UIDownloadCollectionEvent.class, collectionManager)
+            register(FileDownloadedEvent.class, collectionManager)
+            register(FileUnsharedEvent.class, collectionManager)
+            register(SearchEvent.class, collectionManager)
+        }
+        
         log.info("initializing mesh manager")
         MeshManager meshManager = new MeshManager(fileManager, home, props)
         eventBus.register(SourceDiscoveredEvent.class, meshManager)
@@ -307,8 +337,7 @@ public class Core {
         eventBus.register(UIFileUnpublishedEvent.class, persisterFolderService)
 
         log.info("initializing host cache")
-        File hostStorage = new File(home, "hosts.json")
-        hostCache = new HostCache(trustService,hostStorage, 30000, props, i2pSession.getMyDestination())
+        hostCache = new H2HostCache(home,trustService, props, i2pSession.getMyDestination())
         eventBus.register(HostDiscoveredEvent.class, hostCache)
         eventBus.register(ConnectionEvent.class, hostCache)
 
@@ -341,6 +370,10 @@ public class Core {
 
         log.info("initializing connector")
         I2PConnector i2pConnector = new I2PConnector(i2pSocketManager)
+        
+        log.info("initializing collections client")
+        CollectionsClient collectionsClient = new CollectionsClient(i2pConnector, eventBus, me)
+        eventBus.register(UICollectionFetchEvent.class, collectionsClient)
 
         log.info("initializing certificate client")
         CertificateClient certificateClient = new CertificateClient(eventBus, i2pConnector)
@@ -368,7 +401,7 @@ public class Core {
         eventBus.register(UIFeedUpdateEvent.class, feedClient)
         
         log.info "initializing results sender"
-        ResultsSender resultsSender = new ResultsSender(eventBus, i2pConnector, me, props, certificateManager, chatServer)
+        ResultsSender resultsSender = new ResultsSender(eventBus, i2pConnector, me, props, certificateManager, chatServer, collectionManager)
 
         log.info "initializing search manager"
         SearchManager searchManager = new SearchManager(eventBus, me, resultsSender)
@@ -395,6 +428,8 @@ public class Core {
         eventBus.register(UIDownloadPausedEvent.class, downloadManager)
         eventBus.register(UIDownloadResumedEvent.class, downloadManager)
         eventBus.register(DownloadHopelessEvent.class, downloadManager)
+        eventBus.register(UIDownloadCollectionEvent.class, downloadManager)
+        eventBus.register(UIDownloadAttachmentEvent.class, downloadManager)
 
         log.info("initializing upload manager")
         uploadManager = new UploadManager(eventBus, fileManager, meshManager, downloadManager, persisterFolderService, props)
@@ -409,11 +444,11 @@ public class Core {
         I2PAcceptor i2pAcceptor = new I2PAcceptor(i2pSocketManager)
         connectionAcceptor = new ConnectionAcceptor(eventBus, connectionManager, props,
             i2pAcceptor, hostCache, trustService, searchManager, uploadManager, fileManager, connectionEstablisher,
-            certificateManager, chatServer)
+            certificateManager, chatServer, collectionManager)
 
 
         log.info("initializing hasher service")
-        hasherService = new HasherService(new FileHasher(), eventBus, fileManager, props)
+        hasherService = new HasherService(eventBus, fileManager, props)
         eventBus.register(FileSharedEvent.class, hasherService)
         eventBus.register(FileUnsharedEvent.class, hasherService)
         eventBus.register(DirectoryUnsharedEvent.class, hasherService)
@@ -454,6 +489,16 @@ public class Core {
             register(DirectoryUnsharedEvent.class, directoryWatcher)
             register(WatchedDirectoryConfigurationEvent.class, directoryWatcher)
         }
+        
+        log.info("initializing messenger")
+        messenger = new Messenger(eventBus, home, i2pConnector, props)
+        eventBus.with { 
+            register(UILoadedEvent.class, messenger)
+            register(MessageReceivedEvent.class, messenger)
+            register(UIMessageEvent.class, messenger)
+            register(UIMessageDeleteEvent.class, messenger)
+            register(UIMessageReadEvent.class, messenger)
+        }
     }
 
     public void startServices() {
@@ -461,7 +506,7 @@ public class Core {
         hasherService.start()
         trustService.start()
         trustService.waitForLoad()
-        hostCache.start()
+        hostCache.start({connectionManager.getConnections().collect{ it.endpoint.destination }} as Supplier)
         connectionManager.start()
         cacheClient.start()
         connectionAcceptor.start()
@@ -490,6 +535,8 @@ public class Core {
         persisterService.stop()
         log.info("shutting down persisterFolder service")
         persisterFolderService.stop()
+        log.info("shutting down collection manager")
+        collectionManager.stop()
         log.info("shutting down download manager")
         downloadManager.shutdown()
         log.info("shutting down connection acceptor")
@@ -518,6 +565,8 @@ public class Core {
             log.info("shutting down update client")
             updateClient.stop()
         }
+        log.info("shutting down messenger")
+        messenger.stop()
         log.info("killing socket manager")
         i2pSocketManager.destroySocketManager()
         if (router != null) {
@@ -563,7 +612,7 @@ public class Core {
             }
         }
 
-        Core core = new Core(props, home, "0.7.6")
+        Core core = new Core(props, home, "0.8.4")
         core.startServices()
 
         // ... at the end, sleep or execute script

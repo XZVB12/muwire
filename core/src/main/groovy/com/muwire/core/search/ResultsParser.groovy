@@ -2,10 +2,9 @@ package com.muwire.core.search
 
 import java.util.stream.Collectors
 
-import javax.naming.directory.InvalidSearchControlsException
-
 import com.muwire.core.InfoHash
 import com.muwire.core.Persona
+import com.muwire.core.collections.FileCollection
 import com.muwire.core.files.FileHasher
 import com.muwire.core.util.DataUtil
 
@@ -57,7 +56,7 @@ class ResultsParser {
             }
             InfoHash parsedIH = InfoHash.fromHashList(hashList)
             if (parsedIH.getRoot() != infoHash)
-                throw new InvalidSearchControlsException("infohash root doesn't match")
+                throw new InvalidSearchResultException("infohash root doesn't match")
 
              return new UIResultEvent( sender : p,
                  name : name,
@@ -102,9 +101,19 @@ class ResultsParser {
             if (json.browse != null)
                 browse = json.browse
             
+            boolean browseCollections = false
+            if (json.browseCollections != null)
+                browseCollections = json.browseCollections
+            
             int certificates = 0
             if (json.certificates != null)
                 certificates = json.certificates
+                
+            Set<InfoHash> collections = Collections.emptySet()
+            if (json.collections != null) {
+                collections = new HashSet<>()
+                json.collections.collect(collections, { new InfoHash(Base64.decode(it)) })
+            }
                 
             log.fine("Received result from ${p.getHumanReadableName()} name \"$name\" infoHash:\"${json.infohash}\"")
 
@@ -116,8 +125,10 @@ class ResultsParser {
                 sources : sources,
                 comment : comment,
                 browse : browse,
+                browseCollections : browseCollections,
                 uuid: uuid,
-                certificates : certificates)
+                certificates : certificates,
+                collections : collections)
         } catch (Exception e) {
             throw new InvalidSearchResultException("parsing search result failed",e)
         }

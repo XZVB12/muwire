@@ -19,6 +19,7 @@ import com.muwire.core.Core
 import java.awt.BorderLayout
 import java.awt.GridBagConstraints
 import java.awt.SystemTray
+import java.awt.Taskbar
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 
@@ -47,6 +48,7 @@ class OptionsView {
     def shareDownloadedCheckbox
     def shareHiddenCheckbox
     def searchCommentsCheckbox
+    def searchCollectionsCheckbox
     def browseFilesCheckbox
     def allowTrackingCheckbox
     def speedSmoothSecondsField
@@ -70,6 +72,7 @@ class OptionsView {
     def showSearchHashesCheckbox
     def clearUploadsCheckbox
     def storeSearchHistoryCheckbox
+    def messageNotificationsCheckbox
 
     def inBwField
     def outBwField
@@ -92,6 +95,10 @@ class OptionsView {
     def advertiseChatCheckbox
     def maxChatLinesField
     
+    def allowMessagesCheckbox
+    def allowOnlyTrustedMessagesCheckbox
+    def messageSendIntervalField
+    
     def buttonsPanel
 
     def mainFrame
@@ -109,13 +116,17 @@ class OptionsView {
                     fill : GridBagConstraints.HORIZONTAL, weightx: 100))
                 searchCommentsCheckbox = checkBox(selected : bind {model.searchComments}, constraints : gbc(gridx:1, gridy:0,
                 anchor : GridBagConstraints.LINE_END, fill : GridBagConstraints.HORIZONTAL, weightx: 0))
-                label(text : trans("OPTIONS_ALLOW_BROWSING"), constraints : gbc(gridx : 0, gridy : 1, anchor : GridBagConstraints.LINE_START, 
+                label(text : trans("OPTIONS_SEARCH_IN_COLLECTIONS"), constraints:gbc(gridx: 0, gridy:1, anchor : GridBagConstraints.LINE_START,
                     fill : GridBagConstraints.HORIZONTAL, weightx: 100))
-                browseFilesCheckbox = checkBox(selected : bind {model.browseFiles}, constraints : gbc(gridx : 1, gridy : 1,
+                searchCollectionsCheckbox = checkBox(selected : bind {model.searchCollections}, constraints : gbc(gridx:1, gridy:1,
                 anchor : GridBagConstraints.LINE_END, fill : GridBagConstraints.HORIZONTAL, weightx: 0))
-                label(text : trans("OPTIONS_ALLOW_TRACKING"), constraints : gbc(gridx: 0, gridy: 2, anchor: GridBagConstraints.LINE_START,
+                label(text : trans("OPTIONS_ALLOW_BROWSING"), constraints : gbc(gridx : 0, gridy : 2, anchor : GridBagConstraints.LINE_START, 
                     fill : GridBagConstraints.HORIZONTAL, weightx: 100))
-                allowTrackingCheckbox = checkBox(selected : bind {model.allowTracking}, constraints : gbc(gridx: 1, gridy : 2,
+                browseFilesCheckbox = checkBox(selected : bind {model.browseFiles}, constraints : gbc(gridx : 1, gridy : 2,
+                anchor : GridBagConstraints.LINE_END, fill : GridBagConstraints.HORIZONTAL, weightx: 0))
+                label(text : trans("OPTIONS_ALLOW_TRACKING"), constraints : gbc(gridx: 0, gridy: 3, anchor: GridBagConstraints.LINE_START,
+                    fill : GridBagConstraints.HORIZONTAL, weightx: 100))
+                allowTrackingCheckbox = checkBox(selected : bind {model.allowTracking}, constraints : gbc(gridx: 1, gridy : 3,
                     anchor : GridBagConstraints.LINE_END, fill : GridBagConstraints.HORIZONTAL, weightx : 0))
             }
             
@@ -364,7 +375,22 @@ class OptionsView {
                     button(text : trans("CHOOSE"), constraints : gbc(gridx : 2, gridy : 4, anchor : GridBagConstraints.LINE_END), chooseChatFileAction)
                 }
             }
-            panel(constraints : gbc(gridx: 0, gridy : 1, weighty: 100))
+            panel (border : titledBorder(title : trans("OPTIONS_MESSAGING_SETTINGS"), border : etchedBorder(), titlePosition : TitledBorder.TOP),
+                constraints : gbc(gridx : 0, gridy : 1, fill : GridBagConstraints.HORIZONTAL, weightx: 100)) {
+                gridBagLayout()
+                label(text : trans("OPTIONS_ALLOW_MESSAGES"), constraints : gbc(gridx: 0, gridy: 0, anchor: GridBagConstraints.LINE_START, weightx: 100))
+                allowMessagesCheckbox = checkBox(selected : bind{model.allowMessages}, constraints : gbc(gridx:2, gridy:0, anchor:GridBagConstraints.LINE_END))
+                label(text : trans("OPTIONS_ALLOW_TRUSTED_MESSAGES"), constraints : gbc(gridx: 0, gridy: 1, anchor: GridBagConstraints.LINE_START, weightx: 100))
+                allowOnlyTrustedMessagesCheckbox = checkBox(selected : bind{model.allowOnlyTrustedMessages}, constraints : gbc(gridx:2, gridy:1, anchor:GridBagConstraints.LINE_END))
+                label(text : trans("OPTIONS_MESSAGE_SEND_INTERVAL"), constraints : gbc(gridx: 0, gridy: 2, anchor: GridBagConstraints.LINE_START, weightx: 100))
+                messageSendIntervalField = textField(text : bind{model.messageSendInterval}, constraints : gbc(gridx : 2, gridy : 2, anchor : GridBagConstraints.LINE_END))
+                
+                if (Taskbar.isTaskbarSupported() || SystemTray.isSupported()) {
+                    label(text : trans("OPTIONS_MESSAGE_NOTIFICATIONS"), constraints : gbc(gridx: 0, gridy: 3, anchor: GridBagConstraints.LINE_START, weightx: 100))
+                    messageNotificationsCheckbox = checkBox(selected : bind{model.messageNotifications}, constraints : gbc(gridx:2, gridy:3, anchor:GridBagConstraints.LINE_END))
+                }
+            }
+            panel(constraints : gbc(gridx: 0, gridy : 2, weighty: 100))
         }
 
 
@@ -386,7 +412,7 @@ class OptionsView {
         }
         tabbedPane.addTab(trans("FEED"), feed)
         tabbedPane.addTab(trans("TRUST_NOUN"), trust)
-        tabbedPane.addTab(trans("CHAT"), chat)
+        tabbedPane.addTab(trans("COMMUNICATIONS"), chat)
 
         JPanel panel = new JPanel()
         panel.setLayout(new BorderLayout())

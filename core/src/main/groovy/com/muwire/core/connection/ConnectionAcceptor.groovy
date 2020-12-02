@@ -17,11 +17,15 @@ import com.muwire.core.MuWireSettings
 import com.muwire.core.Persona
 import com.muwire.core.SharedFile
 import com.muwire.core.chat.ChatServer
+import com.muwire.core.collections.CollectionManager
+import com.muwire.core.collections.FileCollection
 import com.muwire.core.filecert.Certificate
 import com.muwire.core.filecert.CertificateManager
 import com.muwire.core.filefeeds.FeedItems
 import com.muwire.core.files.FileManager
 import com.muwire.core.hostcache.HostCache
+import com.muwire.core.messenger.MWMessage
+import com.muwire.core.messenger.MessageReceivedEvent
 import com.muwire.core.trust.TrustLevel
 import com.muwire.core.trust.TrustService
 import com.muwire.core.upload.UploadManager
@@ -54,6 +58,7 @@ class ConnectionAcceptor {
     final ConnectionEstablisher establisher
     final CertificateManager certificateManager
     final ChatServer chatServer
+    final CollectionManager collectionManager
 
     final ExecutorService acceptorThread
     final ExecutorService handshakerThreads
@@ -66,7 +71,7 @@ class ConnectionAcceptor {
         MuWireSettings settings, I2PAcceptor acceptor, HostCache hostCache,
         TrustService trustService, SearchManager searchManager, UploadManager uploadManager,
         FileManager fileManager, ConnectionEstablisher establisher, CertificateManager certificateManager,
-        ChatServer chatServer) {
+        ChatServer chatServer, CollectionManager collectionManager) {
         this.eventBus = eventBus
         this.manager = manager
         this.settings = settings
@@ -79,6 +84,7 @@ class ConnectionAcceptor {
         this.establisher = establisher
         this.certificateManager = certificateManager
         this.chatServer = chatServer
+        this.collectionManager = collectionManager
 
         acceptorThread = Executors.newSingleThreadExecutor { r ->
             def rv = new Thread(r)
@@ -165,6 +171,12 @@ class ConnectionAcceptor {
                     break
                 case (byte)'F':
                     processFEED(e)
+                    break
+                case (byte)'O':
+                    processOLLECTION(e)
+                    break
+                case (byte)'L':
+                    processETTER(e)
                     break
                 default:
                     throw new Exception("Invalid read $read")
@@ -315,6 +327,9 @@ class ConnectionAcceptor {
             boolean chat = false
             if (headers.containsKey('Chat'))
                 chat = Boolean.parseBoolean(headers['Chat'])
+            boolean messages = false
+            if (headers.containsKey('Messages'))
+                messages = Boolean.parseBoolean(headers['Messages'])
             boolean feed = false
             if (headers.containsKey('Feed'))
                 feed = Boolean.parseBoolean(headers['Feed'])
@@ -337,6 +352,7 @@ class ConnectionAcceptor {
                 def json = slurper.parse(payload)
                 results[i] = ResultsParser.parse(sender, resultsUUID, json)
                 results[i].chat = chat
+                results[i].messages = messages
                 results[i].feed = feed
             }
             eventBus.publish(new UIResultBatchEvent(uuid: resultsUUID, results: results))
@@ -349,6 +365,7 @@ class ConnectionAcceptor {
     }
     
     private void processBROWSE(Endpoint e) {
+        DataOutputStream dos = null
         try {
             byte [] rowse = new byte[7]
             DataInputStream dis = new DataInputStream(e.getInputStream())
@@ -388,24 +405,29 @@ class ConnectionAcceptor {
             
             os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
 
-            DataOutputStream dos = new DataOutputStream(new GZIPOutputStream(os))
+            dos = new DataOutputStream(new GZIPOutputStream(os))
             JsonOutput jsonOutput = new JsonOutput()
             sharedFiles.each {
                 it.hit(browser, System.currentTimeMillis(), "Browse Host");
-                int certificates = certificateManager.getByInfoHash(new InfoHash(it.getRoot())).size()
-                def obj = ResultsSender.sharedFileToObj(it, false, certificates)
+                InfoHash ih = new InfoHash(it.getRoot())
+                int certificates = certificateManager.getByInfoHash(ih).size()
+                Set<InfoHash> collections = collectionManager.collectionsForFile(ih)
+                def obj = ResultsSender.sharedFileToObj(it, false, certificates, collections)
                 def json = jsonOutput.toJson(obj)
                 dos.writeShort((short)json.length())
                 dos.write(json.getBytes(StandardCharsets.US_ASCII))
             }
-            dos.flush()
-            dos.close()
         } finally {
+            try {
+                dos?.flush()
+                dos?.close()
+            } catch (Exception ignored) {}
             e.close()
         }
     }
 
     private void processTRUST(Endpoint e) {
+        DataOutputStream dos = null
         try {
             byte[] RUST = new byte[6]
             DataInputStream dis = new DataInputStream(e.getInputStream())
@@ -429,7 +451,7 @@ class ConnectionAcceptor {
             
             List<TrustService.TrustEntry> good = new ArrayList<>(trustService.good.values())
             List<TrustService.TrustEntry> bad = new ArrayList<>(trustService.bad.values())
-            DataOutputStream dos = new DataOutputStream(os)
+            dos = new DataOutputStream(os)
 
             if (!json) {
                 os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
@@ -472,13 +494,16 @@ class ConnectionAcceptor {
                 }
             }
 
-            dos.flush()
         } finally {
+            try {
+                dos?.flush()
+            } catch (IOException ignore) {}
             e.close()
         }
     }
     
     private void processCERTIFICATES(Endpoint e) {
+        DataOutputStream dos = null
         try {
             byte [] ERTIFICATES = new byte[12]
             DataInputStream dis = new DataInputStream(e.getInputStream())
@@ -514,7 +539,7 @@ class ConnectionAcceptor {
             os.write("Count: ${certs.size()}\r\n".getBytes(StandardCharsets.US_ASCII))
             os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
             
-            DataOutputStream dos = new DataOutputStream(os)
+            dos = new DataOutputStream(os)
             certs.each { 
                 ByteArrayOutputStream baos = new ByteArrayOutputStream()
                 it.write(baos)
@@ -522,8 +547,10 @@ class ConnectionAcceptor {
                 dos.writeShort(payload.length)
                 dos.write(payload)
             }
-            dos.close()
         } finally {
+            try {
+                dos?.close()
+            } catch (Exception ignored) {}
             e.close()
         }
     }
@@ -538,6 +565,7 @@ class ConnectionAcceptor {
     }
     
     private void processFEED(Endpoint e) {
+        DataOutputStream dos = null
         try {
             byte[] EED = new byte[5];
             DataInputStream dis = new DataInputStream(e.getInputStream())
@@ -572,7 +600,7 @@ class ConnectionAcceptor {
             os.write("Count: ${published.size()}\r\n".getBytes(StandardCharsets.US_ASCII));
             os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
 
-            DataOutputStream dos = new DataOutputStream(new GZIPOutputStream(os))
+            dos = new DataOutputStream(new GZIPOutputStream(os))
             JsonOutput jsonOutput = new JsonOutput()
             final long now = System.currentTimeMillis();
             published.each {
@@ -583,8 +611,115 @@ class ConnectionAcceptor {
                 dos.writeShort((short)json.length())
                 dos.write(json.getBytes(StandardCharsets.US_ASCII))
             }
-            dos.flush()
-            dos.close()
+        } finally {
+            try {
+                dos?.flush()
+                dos?.close()
+            } catch(Exception ignore) {}
+            e.close()
+        }
+    }
+    
+    private void processOLLECTION(Endpoint e) {
+        DataOutputStream dos = null
+        try {
+            byte [] OLLECTION = new byte[9]
+            DataInputStream dis = new DataInputStream(e.getInputStream())
+            dis.readFully(OLLECTION)
+            if (OLLECTION != "LLECTION ".getBytes(StandardCharsets.US_ASCII))
+                throw new Exception("invalid OLLECTION connection")
+            
+            String infoHashString = DataUtil.readTillRN(dis)
+            
+            Map<String,String> headers = DataUtil.readAllHeaders(dis)
+            if (headers['Version'] != "1")
+                throw new Exception("Unknown version ${headers['Version']}")
+            
+            Persona client = null
+            if (headers.containsKey("Persona"))
+                client = new Persona(new ByteArrayInputStream(Base64.decode(headers['Persona'])))
+                    
+            Map<InfoHash, FileCollection> available = new HashMap<>()
+            if (infoHashString == "*") {
+                if (settings.browseFiles) {
+                    collectionManager.getCollections().each { 
+                        available.put(it.getInfoHash(), it)
+                    }
+                }
+            } else {
+                def infoHashes = infoHashString.split(",").toList().collect {new InfoHash(Base64.decode(it))}
+                infoHashes = new HashSet<>(infoHashes)
+                infoHashes.each {
+                    FileCollection col = collectionManager.getByInfoHash(it)
+                    if (col != null) {
+                        available.put(it, col)
+                        col.hit(client)
+                    }
+                }
+            }
+
+            OutputStream os = e.getOutputStream()            
+            
+            if (available.isEmpty()) {
+                os.write("404\r\n\r\n".getBytes(StandardCharsets.US_ASCII))
+                return
+            }
+             
+            os.write("200\r\n".getBytes(StandardCharsets.US_ASCII))
+            os.write("Version:1\r\n".getBytes(StandardCharsets.US_ASCII))
+            os.write("Count:${available.size()}\r\n".getBytes(StandardCharsets.US_ASCII))
+            os.write("\r\n".getBytes(StandardCharsets.US_ASCII))
+            
+            dos = new DataOutputStream(new GZIPOutputStream(os))
+            available.each { hash, collection ->
+                dos.write(hash.getRoot())
+                collection.write(dos)
+            }    
+                
+        } finally {
+            try {
+                dos?.flush()
+                dos?.close()
+            } catch (Exception ignore) {}
+            try {
+                e.getOutputStream().close()
+            } catch(Exception ignore) {}
+            e.close()
+        }
+    }
+    
+    private void processETTER(Endpoint e) {
+        byte [] ETTER = "ETTER\r\n".getBytes(StandardCharsets.US_ASCII)
+        byte [] read = new byte[ETTER.length]
+        
+        if (!settings.allowMessages) {
+            e.close()
+            return
+        }
+        
+        if (settings.allowOnlyTrustedMessages && trustService.getLevel(e.destination) != TrustLevel.TRUSTED) {
+            e.close()
+            return
+        }
+        
+        DataInputStream dis = new DataInputStream(e.getInputStream())
+        try {
+            dis.readFully(read)
+            if (ETTER != read)
+                throw new Exception("invalid ETTER")
+                
+            Map<String,String> headers = DataUtil.readAllHeaders(dis)
+            if (headers['Version'] != "1")
+                throw new Exception("unrecognized version")
+            int count = Integer.parseInt(headers['Count'])
+            
+            dis = new DataInputStream(new GZIPInputStream(dis))
+            count.times { 
+                MWMessage m = new MWMessage(dis)
+                eventBus.publish(new MessageReceivedEvent(message : m))
+            }
+        } catch (Exception bad) {
+            log.log(Level.WARNING, "failed to process LETTER", bad)
         } finally {
             e.close()
         }

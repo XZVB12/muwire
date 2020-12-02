@@ -13,6 +13,7 @@ import javax.swing.JOptionPane
 import javax.swing.JTable
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreeModel
 import javax.swing.tree.TreeNode
 
 import com.muwire.core.Core
@@ -21,6 +22,11 @@ import com.muwire.core.MuWireSettings
 import com.muwire.core.Persona
 import com.muwire.core.RouterDisconnectedEvent
 import com.muwire.core.SharedFile
+import com.muwire.core.collections.CollectionDownloadedEvent
+import com.muwire.core.collections.CollectionLoadedEvent
+import com.muwire.core.collections.CollectionUnsharedEvent
+import com.muwire.core.collections.FileCollection
+import com.muwire.core.collections.UICollectionCreatedEvent
 import com.muwire.core.connection.ConnectionAttemptStatus
 import com.muwire.core.connection.ConnectionEvent
 import com.muwire.core.connection.DisconnectionEvent
@@ -44,6 +50,12 @@ import com.muwire.core.files.FileLoadedEvent
 import com.muwire.core.files.FileSharedEvent
 import com.muwire.core.files.FileUnsharedEvent
 import com.muwire.core.files.SideCarFileEvent
+import com.muwire.core.messenger.MWMessage
+import com.muwire.core.messenger.MessageLoadedEvent
+import com.muwire.core.messenger.MessageReceivedEvent
+import com.muwire.core.messenger.MessageSentEvent
+import com.muwire.core.messenger.Messenger
+import com.muwire.core.messenger.UIMessageReadEvent
 import com.muwire.core.search.QueryEvent
 import com.muwire.core.search.SearchEvent
 import com.muwire.core.search.UIResultBatchEvent
@@ -58,6 +70,8 @@ import com.muwire.core.upload.UploadEvent
 import com.muwire.core.upload.UploadFinishedEvent
 import com.muwire.core.upload.Uploader
 import com.muwire.core.util.BandwidthCounter
+
+import static com.muwire.gui.Translator.trans
 
 import griffon.core.GriffonApplication
 import griffon.core.artifact.GriffonModel
@@ -85,11 +99,15 @@ class MainFrameModel {
     @Observable boolean routerPresent
 
     def results = new ConcurrentHashMap<>()
+    def browses = new ConcurrentHashSet<String>()
+    def collections = new ConcurrentHashSet<String>()
+    List<FileCollection> localCollections = Collections.synchronizedList(new ArrayList<>())
+    List<SharedFile> collectionFiles = new ArrayList<>()
     def downloads = []
     def uploads = []
     boolean treeVisible = true
     def shared 
-    def sharedTree 
+    TreeModel sharedTree 
     def treeRoot
     final Map<SharedFile, TreeNode> fileToNode = new HashMap<>()
     def connectionList = []
@@ -100,9 +118,17 @@ class MainFrameModel {
     def feeds = []
     def feedItems = []
     
+    def messageFolders = [trans("INBOX"), trans("OUTBOX"), trans("SENT")] 
+    List<MWMessageStatus> messageHeaders = new ArrayList<>()
+    Map<Integer, Set<MWMessageStatus>> messageHeadersMap = new HashMap<>()
+    int folderIdx
+    List<Object> messageAttachments = new ArrayList<>()
+    MessageNotificator messageNotificator
+    
     boolean sessionRestored
 
     @Observable int connections
+    @Observable int messages
     @Observable String me
     @Observable int loadedFiles
     @Observable File hashingFile
@@ -126,18 +152,29 @@ class MainFrameModel {
     @Observable boolean markDistrustedButtonEnabled
     @Observable boolean browseFromTrustedButtonEnabled
     @Observable boolean chatFromTrustedButtonEnabled
+    @Observable boolean messageFromTrustedButtonEnabled
     @Observable boolean markNeutralFromDistrustedButtonEnabled
     @Observable boolean markTrustedButtonEnabled
     @Observable boolean reviewButtonEnabled
     @Observable boolean updateButtonEnabled
     @Observable boolean unsubscribeButtonEnabled
     
+    @Observable boolean viewCollectionCommentButtonEnabled
+    @Observable boolean viewItemCommentButtonEnabled
+    @Observable boolean deleteCollectionButtonEnabled 
+    
+    @Observable boolean messageButtonsEnabled
+    @Observable boolean messageAttachmentsButtonEnabled
+    @Observable String messageRecipientList
+    
     @Observable boolean searchesPaneButtonEnabled
     @Observable boolean downloadsPaneButtonEnabled
     @Observable boolean uploadsPaneButtonEnabled
+    @Observable boolean collectionsPaneButtonEnabled
     @Observable boolean monitorPaneButtonEnabled
     @Observable boolean feedsPaneButtonEnabled
     @Observable boolean trustPaneButtonEnabled
+    @Observable boolean messagesPaneButtonEnabled
     @Observable boolean chatPaneButtonEnabled
     
     @Observable boolean chatServerRunning
@@ -171,9 +208,15 @@ class MainFrameModel {
 
         uiSettings = application.context.get("ui-settings")
         
+        messageNotificator = new MessageNotificator(uiSettings, application.context.get("tray-icon"))
+        
         shared = []
         treeRoot = new DefaultMutableTreeNode()
         sharedTree = new DefaultTreeModel(treeRoot)
+        
+        messageHeadersMap.put(0, new LinkedHashSet<>())
+        messageHeadersMap.put(1, new LinkedHashSet<>())
+        messageHeadersMap.put(2, new LinkedHashSet<>())
 
         Timer timer = new Timer("download-pumper", true)
         timer.schedule({
@@ -252,6 +295,14 @@ class MainFrameModel {
             core.eventBus.register(FeedFetchEvent.class, this)
             core.eventBus.register(FeedItemFetchedEvent.class, this)
             core.eventBus.register(UIFeedConfigurationEvent.class, this)
+            core.eventBus.register(CollectionLoadedEvent.class, this)
+            core.eventBus.register(UICollectionCreatedEvent.class, this)
+            core.eventBus.register(CollectionDownloadedEvent.class, this)
+            core.eventBus.register(CollectionUnsharedEvent.class, this)
+            core.eventBus.register(MessageLoadedEvent.class, this)
+            core.eventBus.register(MessageReceivedEvent.class, this)
+            core.eventBus.register(UIMessageReadEvent.class, this)
+            core.eventBus.register(MessageSentEvent.class, this)
 
             core.muOptions.watchedKeywords.each {
                 core.eventBus.publish(new ContentControlEvent(term : it, regex: false, add: true))
@@ -309,6 +360,7 @@ class MainFrameModel {
 
     void onAllFilesLoadedEvent(AllFilesLoadedEvent e) {
         runInsideUIAsync {
+            view.magicTreeExpansion()
             core.muOptions.trustSubscriptions.each {
                 core.eventBus.publish(new TrustSubscriptionEvent(persona : it, subscribe : true))
             }
@@ -376,7 +428,7 @@ class MainFrameModel {
             table.model.fireTableDataChanged()
         }
     }
-
+    
     void onFileHashingEvent(FileHashingEvent e) {
         runInsideUIAsync {
             hashingFile = e.hashingFile
@@ -750,5 +802,125 @@ class MainFrameModel {
             
         File target = new File(core.getMuOptions().getDownloadLocation(), e.item.getName())    
         core.eventBus.publish(new UIDownloadFeedItemEvent(item : e.item, target : target, sequential : feed.isSequential()))
+    }
+    
+    void onCollectionLoadedEvent(CollectionLoadedEvent e) {
+        if (!e.local)
+            return 
+        runInsideUIAsync {
+            localCollections.add(e.collection)
+            view.collectionsTable.model.fireTableDataChanged()
+        }
+    }
+    
+    void onUICollectionCreatedEvent(UICollectionCreatedEvent e) {
+        runInsideUIAsync {
+            localCollections.add(e.collection)
+            view.collectionsTable.model.fireTableDataChanged()
+        }
+    }
+    
+    void onCollectionDownloadedEvent(CollectionDownloadedEvent e) {
+        if (!core.muOptions.shareDownloadedFiles)
+            return
+        runInsideUIAsync {
+            localCollections.add(e.collection)
+            view.collectionsTable.model.fireTableDataChanged()
+        }
+    }
+    
+    void onCollectionUnsharedEvent(CollectionUnsharedEvent e) {
+        runInsideUIAsync {
+            localCollections.remove(e.collection)
+            view.collectionsTable.model.fireTableDataChanged()
+            collectionFiles.clear()
+            view.collectionFilesTable.model.fireTableDataChanged()
+        }
+    }
+    
+    void addToOutbox(MWMessage message) {
+        messageHeadersMap.get(Messenger.OUTBOX).add(new MWMessageStatus(message, false))
+        if (folderIdx == Messenger.OUTBOX) {
+            messageHeaders.clear()
+            messageHeaders.addAll(messageHeadersMap.get(Messenger.OUTBOX))
+            view.messageHeaderTable.model.fireTableDataChanged()
+        }
+    }
+    
+    void onMessageLoadedEvent(MessageLoadedEvent e) {
+        runInsideUIAsync {
+            messageHeadersMap.get(e.folder).add(new MWMessageStatus(e.message, e.unread))
+            if (e.unread) {
+                messages++
+                messageNotificator.messages(messages)
+            }
+            if (e.folder == folderIdx) {
+                messageHeaders.clear()
+                messageHeaders.addAll(messageHeadersMap.get(folderIdx))
+                view.messageHeaderTable.model.fireTableDataChanged()
+            }
+        }
+    }
+    
+    void onMessageReceivedEvent(MessageReceivedEvent e) {
+        runInsideUIAsync {
+            if (messageHeadersMap.get(Messenger.INBOX).add(new MWMessageStatus(e.message, true))) {
+                messages++
+                messageNotificator.newMessage(e.message.sender.getHumanReadableName())
+                messageNotificator.messages(messages)
+                if (folderIdx == Messenger.INBOX) {
+                    messageHeaders.clear()
+                    messageHeaders.addAll(messageHeadersMap.get(Messenger.INBOX))
+                    view.messageHeaderTable.model.fireTableDataChanged()
+                }
+            }
+        }
+    }
+    
+    void onMessageSentEvent(MessageSentEvent e) {
+        runInsideUIAsync {
+            MWMessageStatus status = new MWMessageStatus(e.message, false)
+            messageHeadersMap.get(Messenger.OUTBOX).remove(status)
+            messageHeadersMap.get(Messenger.SENT).add(status)
+            if (folderIdx != Messenger.INBOX) {
+                messageHeaders.clear()
+                messageHeaders.addAll(messageHeadersMap.get(folderIdx))
+                view.messageHeaderTable.model.fireTableDataChanged()
+            }
+        }
+    }
+    
+    void onUIMessageReadEvent(UIMessageReadEvent e) {
+        runInsideUIAsync {
+            messages--
+            messageNotificator.messages(messages)
+        }
+    }
+    
+    void deleteMessage(MWMessage message) {
+        MWMessageStatus status = new MWMessageStatus(message, false)
+        messageHeadersMap.get(folderIdx).remove(status)
+        messageHeaders.remove(status)
+        view.messageHeaderTable.model.fireTableDataChanged()
+        view.messageBody.setText("")
+        view.messageSplitPane.setDividerLocation(1.0d)
+    }
+    
+    static class MWMessageStatus {
+        private final MWMessage message
+        private boolean status
+        MWMessageStatus(MWMessage message, boolean status) {
+            this.message = message
+            this.status = status
+        }
+        
+        public int hashCode() {
+            message.hashCode()
+        }
+        
+        public boolean equals(Object o) {
+            MWMessageStatus other = (MWMessageStatus) o
+            message.equals(other.message)
+        }
     }
 }

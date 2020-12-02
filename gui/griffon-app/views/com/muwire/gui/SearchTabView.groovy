@@ -75,7 +75,9 @@ class SearchTabView {
                                             closureColumn(header : trans("SENDER"), preferredWidth : 500, type: String, read : {row -> row.getHumanReadableName()})
                                             closureColumn(header : trans("RESULTS"), preferredWidth : 20, type: Integer, read : {row -> model.sendersBucket[row].size()})
                                             closureColumn(header : trans("BROWSE"), preferredWidth : 20, type: Boolean, read : {row -> model.sendersBucket[row].first().browse})
+                                            closureColumn(header : trans("COLLECTIONS"), preferredWidth : 20, type: Boolean, read : {row -> model.sendersBucket[row].first().browseCollections})
                                             closureColumn(header : trans("FEED"), preferredWidth : 20, type : Boolean, read : {row -> model.sendersBucket[row].first().feed})
+                                            closureColumn(header : trans("MESSAGES"), preferredWidth : 20, type : Boolean, read : {row -> model.sendersBucket[row].first().messages})
                                             closureColumn(header : trans("CHAT"), preferredWidth : 20, type : Boolean, read : {row -> model.sendersBucket[row].first().chat})
                                             closureColumn(header : trans("TRUST_NOUN"), preferredWidth : 50, type: String, read : { row ->
                                                 trans(model.core.trustService.getLevel(row.destination).name())
@@ -84,15 +86,18 @@ class SearchTabView {
                                     }
                                 }
                                 panel(constraints : BorderLayout.SOUTH) {
-                                    gridLayout(rows: 1, cols : 2)
+                                    gridLayout(rows: 1, cols : 3)
                                     panel (border : etchedBorder()){
-                                        button(text : trans("BROWSE_HOST"), enabled : bind {model.browseActionEnabled}, browseAction)
                                         button(text : trans("SUBSCRIBE"), enabled : bind {model.subscribeActionEnabled}, subscribeAction)
+                                        button(text : trans("MESSAGE_VERB"), enabled : bind{model.messageActionEnabled}, messageAction)
                                         button(text : trans("CHAT"), enabled : bind{model.chatActionEnabled}, chatAction)
                                     }
+                                    panel (border : etchedBorder()) {
+                                        button(text : trans("BROWSE_HOST"), enabled : bind {model.browseActionEnabled}, browseAction)
+                                        button(text : trans("BROWSE_COLLECTIONS"), enabled : bind {model.browseCollectionsActionEnabled}, browseCollectionsAction)
+                                    }
                                     panel (border : etchedBorder()){
-                                        button(text : trans("TRUST_VERB"), enabled: bind {model.trustButtonsEnabled }, trustAction)
-                                        button(text : trans("NEUTRAL"), enabled: bind {model.trustButtonsEnabled}, neutralAction)
+                                        button(text : trans("ADD_CONTACT"), enabled: bind {model.trustButtonsEnabled }, trustAction)
                                         button(text : trans("DISTRUST"), enabled : bind {model.trustButtonsEnabled}, distrustAction)
                                     }
                                 }
@@ -108,6 +113,7 @@ class SearchTabView {
                                             closureColumn(header: trans("POSSIBLE_SOURCES"), preferredWidth : 50, type : Integer, read : {row -> model.sourcesBucket[row.infohash].size()})
                                             closureColumn(header: trans("COMMENTS"), preferredWidth: 20, type: Boolean, read : {row -> row.comment != null})
                                             closureColumn(header: trans("CERTIFICATES"), preferredWidth: 20, type: Integer, read : {row -> row.certificates})
+                                            closureColumn(header: trans("COLLECTIONS"), preferredWidth: 20, type: Integer, read : {UIResultEvent row -> row.collections.size()})
                                         }
                                     }
                                 }
@@ -117,8 +123,9 @@ class SearchTabView {
                                     button(text : trans("DOWNLOAD"), enabled : bind {model.downloadActionEnabled}, constraints : gbc(gridx : 1, gridy:0), downloadAction)
                                     button(text : trans("VIEW_COMMENT"), enabled : bind {model.viewCommentActionEnabled}, constraints : gbc(gridx:2, gridy:0),  showCommentAction)
                                     button(text : trans("VIEW_CERTIFICATES"), enabled : bind {model.viewCertificatesActionEnabled}, constraints : gbc(gridx:3, gridy:0), viewCertificatesAction)
-                                    label(text : trans("DOWNLOAD_SEQUENTIALLY"), constraints : gbc(gridx: 4, gridy: 0, weightx : 80, anchor : GridBagConstraints.LINE_END))
-                                    sequentialDownloadCheckbox = checkBox(constraints : gbc(gridx : 5, gridy: 0, anchor : GridBagConstraints.LINE_END),
+                                    button(text : trans("VIEW_COLLECTIONS"), enabled : bind {model.viewCollectionsActionEnabled}, constraints : gbc(gridx:4, gridy:0), viewCollectionsAction)
+                                    label(text : trans("DOWNLOAD_SEQUENTIALLY"), constraints : gbc(gridx: 5, gridy: 0, weightx : 80, anchor : GridBagConstraints.LINE_END))
+                                    sequentialDownloadCheckbox = checkBox(constraints : gbc(gridx : 6, gridy: 0, anchor : GridBagConstraints.LINE_END),
                                     selected : false, enabled : bind {model.downloadActionEnabled})
                                 }
                             }
@@ -175,6 +182,13 @@ class SearchTabView {
                                                 }
                                                 count
                                             })
+                                            closureColumn(header : trans("COLLECTIONS"), preferredWidth : 20, type : Integer, read : {
+                                                int count = 0
+                                                model.hashBucket[it].each { UIResultEvent row ->
+                                                    count += row.collections.size()
+                                                }
+                                                count
+                                            })
                                         }
                                     }
                                 }
@@ -199,9 +213,11 @@ class SearchTabView {
                                             closureColumn(header : trans("SENDER"), preferredWidth : 350, type : String, read : {it.sender.getHumanReadableName()})
                                             closureColumn(header : trans("BROWSE"), preferredWidth : 20, type : Boolean, read : {it.browse})
                                             closureColumn(header : trans("FEED"), preferredWidth : 20, type: Boolean, read : {it.feed})
+                                            closureColumn(header : trans("MESSAGES"), preferredWidth : 20, type: Boolean, read : {it.messages})
                                             closureColumn(header : trans("CHAT"), preferredWidth : 20, type : Boolean, read : {it.chat})
                                             closureColumn(header : trans("COMMENT"), preferredWidth : 20, type : Boolean, read : {it.comment != null})
                                             closureColumn(header : trans("CERTIFICATES"), preferredWidth : 20, type: Integer, read : {it.certificates})
+                                            closureColumn(header : trans("COLLECTIONS"), preferredWidth : 20, type: Integer, read : {UIResultEvent row -> row.collections.size()})
                                             closureColumn(header : trans("TRUST_NOUN"), preferredWidth : 50, type : String, read : {
                                                 trans(model.core.trustService.getLevel(it.sender.destination).name())
                                             })
@@ -209,17 +225,29 @@ class SearchTabView {
                                     }
                                 } 
                                 panel (constraints : BorderLayout.SOUTH) {
-                                    gridLayout(rows : 1, cols : 2)
+                                    gridLayout(rows : 1, cols : 5)
                                     panel (border : etchedBorder()) {
-                                        button(text : trans("BROWSE_HOST"), enabled : bind {model.browseActionEnabled}, browseAction)
-                                        button(text : trans("SUBSCRIBE"), enabled : bind {model.subscribeActionEnabled}, subscribeAction)
-                                        button(text : trans("CHAT"), enabled : bind{model.chatActionEnabled}, chatAction)
-                                        button(text : trans("VIEW_COMMENT"), enabled : bind {model.viewCommentActionEnabled}, showCommentAction)
-                                        button(text : trans("VIEW_CERTIFICATES"), enabled : bind {model.viewCertificatesActionEnabled}, viewCertificatesAction)
+                                        gridLayout()
+                                        button(text : trans("VIEW_COMMENT"), enabled : bind {model.viewCommentActionEnabled}, constraints : gbc(gridx : 0, gridy : 0), showCommentAction)
+                                        button(text : trans("SUBSCRIBE"), enabled : bind {model.subscribeActionEnabled}, constraints : gbc(gridx : 1, gridy : 0), subscribeAction)
                                     }
                                     panel (border : etchedBorder()) {
-                                        button(text : trans("TRUST_VERB"), enabled: bind {model.trustButtonsEnabled }, trustAction)
-                                        button(text : trans("NEUTRAL"), enabled: bind {model.trustButtonsEnabled}, neutralAction)
+                                        gridBagLayout()
+                                        button(text : trans("VIEW_CERTIFICATES"), enabled : bind {model.viewCertificatesActionEnabled}, constraints : gbc(gridx : 0, gridy : 0), viewCertificatesAction)
+                                        button(text : trans("VIEW_COLLECTIONS"), enabled : bind {model.viewCollectionsActionEnabled}, constraints : gbc(gridx : 1, gridy : 0), viewCollectionsAction)
+                                    }
+                                    panel (border : etchedBorder()) {
+                                        gridBagLayout()
+                                        button(text : trans("BROWSE_HOST"), enabled : bind {model.browseActionEnabled}, constraints : gbc(gridx : 0, gridy : 0), browseAction)
+                                        button(text : trans("BROWSE_COLLECTIONS"), enabled : bind {model.browseCollectionsActionEnabled}, constraints : gbc(gridx : 1, gridy : 0), browseCollectionsAction)
+                                    }
+                                    panel (border : etchedBorder()) {
+                                        gridBagLayout()
+                                        button(text : trans("MESSAGE_VERB"), enabled : bind {model.messageActionEnabled}, constraints : gbc(gridx : 0, gridy :0), messageAction)
+                                        button(text : trans("CHAT"), enabled : bind{model.chatActionEnabled}, constraints : gbc(gridx : 1, gridy : 0), chatAction)
+                                    }
+                                    panel (border : etchedBorder()) {
+                                        button(text : trans("ADD_CONTACT"), enabled: bind {model.trustButtonsEnabled }, trustAction)
                                         button(text : trans("DISTRUST"), enabled : bind {model.trustButtonsEnabled}, distrustAction)
                                     }
                                 }
@@ -290,6 +318,25 @@ class SearchTabView {
         parent.setTabComponentAt(index, tabPanel)
         mvcGroup.parentGroup.view.showSearchWindow.call()
 
+        
+        // senders popup menu
+        JPopupMenu popupMenu = new JPopupMenu()
+        JMenuItem copyFullIDItem = new JMenuItem(trans("COPY_FULL_ID"))
+        copyFullIDItem.addActionListener({mvcGroup.controller.copyFullID()})
+        popupMenu.add(copyFullIDItem)
+        
+        def mouseListener = new MouseAdapter() {
+            public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger() || e.button == MouseEvent.BUTTON3)
+                    popupMenu.show(e.getComponent(), e.getX(), e.getY())
+            }
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger() || e.button == MouseEvent.BUTTON3)
+                    popupMenu.show(e.getComponent(), e.getX(), e.getY())
+            }
+        }
+        
+        
         def centerRenderer = new DefaultTableCellRenderer()
         centerRenderer.setHorizontalAlignment(JLabel.CENTER)
         resultsTable.setDefaultRenderer(Integer.class,centerRenderer)
@@ -322,14 +369,17 @@ class SearchTabView {
                 model.viewCommentActionEnabled = false
                 model.viewCertificatesActionEnabled = false
                 model.subscribeActionEnabled = false
+                model.viewCollectionsActionEnabled = false
                 return
             } else {
                 model.viewCommentActionEnabled = result.comment != null
                 model.viewCertificatesActionEnabled = result.certificates > 0
+                model.viewCollectionsActionEnabled = !result.collections.isEmpty()
             }
         })
         
         // senders table
+        sendersTable.addMouseListener(mouseListener)
         sendersTable.setDefaultRenderer(Integer.class, centerRenderer)
         sendersTable.rowSorter.addRowSorterListener({evt -> lastSendersSortEvent = evt})
         sendersTable.rowSorter.setSortsOnUpdates(true)
@@ -341,11 +391,16 @@ class SearchTabView {
                 model.trustButtonsEnabled = false
                 model.browseActionEnabled = false
                 model.subscribeActionEnabled = false
+                model.browseCollectionsActionEnabled = false
+                model.chatActionEnabled = false
+                model.messageActionEnabled = false
                 return
             } else {
                 Persona sender = model.senders[row]
                 model.browseActionEnabled = model.sendersBucket[sender].first().browse
+                model.browseCollectionsActionEnabled = model.sendersBucket[sender].first().browseCollections
                 model.chatActionEnabled = model.sendersBucket[sender].first().chat
+                model.messageActionEnabled = model.sendersBucket[sender].first().messages
                 model.subscribeActionEnabled = model.sendersBucket[sender].first().feed &&
                     model.core.feedManager.getFeed(sender) == null
                 model.trustButtonsEnabled = true
@@ -354,6 +409,7 @@ class SearchTabView {
                 resultsTable.model.fireTableDataChanged()
             }
         })
+        
         
         // results table 2
         resultsTable2.setDefaultRenderer(Integer.class,centerRenderer)
@@ -367,8 +423,11 @@ class SearchTabView {
             if (e == null) {
                 model.trustButtonsEnabled = false
                 model.browseActionEnabled = false
+                model.browseCollectionsActionEnabled = false
                 model.chatActionEnabled = false
+                model.messageActionEnabled = false
                 model.viewCertificatesActionEnabled = false
+                model.viewCollectionsActionEnabled = false
                 return
             }
             model.downloadActionEnabled = true
@@ -392,6 +451,7 @@ class SearchTabView {
         // TODO: add download right-click action
         
         // senders table 2
+        sendersTable2.addMouseListener(mouseListener)
         sendersTable2.setDefaultRenderer(Integer.class, centerRenderer)
         sendersTable2.rowSorter.addRowSorterListener({ evt -> lastSenders2SortEvent = evt})
         sendersTable2.rowSorter.setSortsOnUpdates(true)
@@ -401,20 +461,26 @@ class SearchTabView {
             int row = selectedSenderRow()
             if (row < 0 || model.senders2[row] == null) {
                 model.browseActionEnabled = false
+                model.browseCollectionsActionEnabled = false
                 model.chatActionEnabled = false
+                model.messageActionEnabled = false
                 model.subscribeActionEnabled = false
                 model.viewCertificatesActionEnabled = false
+                model.viewCollectionsActionEnabled = false
                 model.trustButtonsEnabled = false
                 model.viewCommentActionEnabled = false
                 return
             }
             UIResultEvent e = model.senders2[row]
             model.browseActionEnabled = e.browse
+            model.browseCollectionsActionEnabled = e.browseCollections
             model.chatActionEnabled = e.chat
+            model.messageActionEnabled = e.messages
             model.subscribeActionEnabled = e.feed && model.core.feedManager.getFeed(e.getSender()) == null 
             model.trustButtonsEnabled = true
             model.viewCommentActionEnabled = e.comment != null
             model.viewCertificatesActionEnabled = e.certificates > 0
+            model.viewCollectionsActionEnabled = !e.collections.isEmpty()
         })
        
         if (settings.groupByFile)
@@ -461,6 +527,13 @@ class SearchTabView {
                 JMenuItem viewCerts = new JMenuItem(trans("VIEW_CERTIFICATES"))
                 viewCerts.addActionListener({mvcGroup.controller.viewCertificates()})
                 menu.add(viewCerts)
+            }
+            
+            // view collections if any
+            if (model.viewCollectionsActionEnabled) {
+                JMenuItem viewCols = new JMenuItem(trans("VIEW_COLLECTIONS"))
+                viewCols.addActionListener({mvcGroup.controller.viewCollections()})
+                menu.add(viewCols)
             }
         }
         if (showMenu)

@@ -20,6 +20,7 @@ class OptionsModel {
     @Observable String downloadLocation
     @Observable String incompleteLocation
     @Observable boolean searchComments
+    @Observable boolean searchCollections
     @Observable boolean browseFiles
     @Observable boolean allowTracking
     @Observable int speedSmoothSeconds
@@ -49,6 +50,7 @@ class OptionsModel {
     @Observable boolean groupByFile
     @Observable boolean exitOnClose
     @Observable boolean closeDecisionMade 
+    @Observable boolean messageNotifications
 
     // bw options
     @Observable String inBw
@@ -76,6 +78,11 @@ class OptionsModel {
     @Observable int maxChatLines
     @Observable String chatWelcomeFile
     
+    // messaging options
+    @Observable boolean allowMessages
+    @Observable boolean allowOnlyTrustedMessages
+    @Observable int messageSendInterval
+    
     boolean disableUpdates
 
     void mvcGroupInit(Map<String, String> args) {
@@ -89,6 +96,7 @@ class OptionsModel {
         downloadLocation = settings.downloadLocation.getAbsolutePath()
         incompleteLocation = settings.incompleteLocation.getAbsolutePath()
         searchComments = settings.searchComments
+        searchCollections = settings.searchCollections
         browseFiles = settings.browseFiles
         allowTracking = settings.allowTracking
         speedSmoothSeconds = settings.speedSmoothSeconds
@@ -117,6 +125,7 @@ class OptionsModel {
         exitOnClose = uiSettings.exitOnClose
         storeSearchHistory = uiSettings.storeSearchHistory
         groupByFile = uiSettings.groupByFile
+        messageNotifications = uiSettings.messageNotifications
 
         if (core.router != null) {
             inBw = String.valueOf(settings.inBw)
@@ -141,6 +150,10 @@ class OptionsModel {
         advertiseChat = settings.advertiseChat
         maxChatLines = uiSettings.maxChatLines
         chatWelcomeFile = settings.chatWelcomeFile?.getAbsolutePath()
+        
+        allowMessages = settings.allowMessages
+        allowOnlyTrustedMessages = settings.allowOnlyTrustedMessages
+        messageSendInterval = settings.messageSendInterval
         
         disableUpdates = settings.disableUpdates
     }

@@ -35,8 +35,7 @@ class BrowseView {
     @MVCMember @Nonnull
     BrowseController controller
 
-    def mainFrame
-    def dialog
+    def parent
     def p
     def resultsTable
     def lastSortEvent
@@ -44,9 +43,6 @@ class BrowseView {
     
     void initUI() {
         int rowHeight = application.context.get("row-height")
-        mainFrame = application.windowManager.findWindow("main-frame")
-        dialog = new JDialog(mainFrame, model.host.getHumanReadableName(), true)
-        dialog.setResizable(true)
         
         p = builder.panel {
             borderLayout()
@@ -62,6 +58,7 @@ class BrowseView {
                         closureColumn(header: trans("SIZE"), preferredWidth: 20, type: Long, read : {row -> row.size})
                         closureColumn(header: trans("COMMENTS"), preferredWidth: 20, type: Boolean, read : {row -> row.comment != null})
                         closureColumn(header: trans("CERTIFICATES"), preferredWidth: 20, type: Integer, read : {row -> row.certificates})
+                        closureColumn(header: trans("COLLECTIONS"), preferredWidth: 20, type: Integer, read : {row -> row.collections.size()})
                     }
                 }
             }
@@ -69,8 +66,8 @@ class BrowseView {
                 button(text : trans("DOWNLOAD"), enabled : bind {model.downloadActionEnabled}, downloadAction)
                 button(text : trans("VIEW_COMMENT"), enabled : bind{model.viewCommentActionEnabled}, viewCommentAction)
                 button(text : trans("VIEW_CERTIFICATES"), enabled : bind{model.viewCertificatesActionEnabled}, viewCertificatesAction)
+                button(text : trans("VIEW_COLLECTIONS"), enabled : bind{model.viewCollectionsActionEnabled}, viewCollectionsAction)
                 button(text : trans("CHAT"), enabled : bind {model.chatActionEnabled}, chatAction)
-                button(text : trans("CLOSE"), dismissAction)
                 label(text : trans("DOWNLOAD_SEQUENTIALLY"))
                 sequentialDownloadCheckbox = checkBox()
             }
@@ -94,6 +91,7 @@ class BrowseView {
                 model.downloadActionEnabled = false
                 model.viewCommentActionEnabled = false
                 model.viewCertificatesActionEnabled = false
+                model.viewCollectionsActionEnabled = false
                 return
             }
             
@@ -106,6 +104,7 @@ class BrowseView {
             boolean downloadActionEnabled = true
             
             model.viewCertificatesActionEnabled = (rows.length == 1 && model.results[rows[0]].certificates > 0)
+            model.viewCollectionsActionEnabled = rows.length == 1 && model.results[rows[0]].collections.size() > 0
             
             if (rows.length == 1 && model.results[rows[0]].comment != null) 
                 model.viewCommentActionEnabled = true
@@ -142,6 +141,11 @@ class BrowseView {
             JMenuItem viewComment = new JMenuItem(trans("VIEW_COMMENT"))
             viewComment.addActionListener({controller.viewComment()})
             menu.add(viewComment)
+        }
+        if (model.viewCollectionsActionEnabled) {
+            JMenuItem viewCollections = new JMenuItem(trans("VIEW_COLLECTIONS"))
+            viewCollections.addActionListener({controller.viewCollections()})
+            menu.add(viewCollections)
         }
         if (model.viewCertificatesActionEnabled) {
             JMenuItem viewCertificates = new JMenuItem(trans("VIEW_CERTIFICATES"))
@@ -186,19 +190,31 @@ class BrowseView {
         def clipboard = Toolkit.getDefaultToolkit().getSystemClipboard()
         clipboard.setContents(selection, null)
     }
+    
     void mvcGroupInit(Map<String,String> args) {
         controller.register()
         
-        dialog.getContentPane().add(p)
-        dialog.setSize(700, 400)
-        dialog.setLocationRelativeTo(mainFrame)
-        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE)
-        dialog.addWindowListener( new WindowAdapter() {
-            public void windowClosed(WindowEvent e) {
-                mvcGroup.destroy()
+        def mainFrameGroup = application.mvcGroupManager.findGroup("MainFrame")
+        mainFrameGroup.model.browses.add(model.host.getHumanReadableName())
+        parent = mainFrameGroup.view.builder.getVariable("result-tabs")
+        parent.addTab(model.host.getHumanReadableName(), p)
+        
+        int index = parent.indexOfComponent(p)
+        parent.setSelectedIndex(index)
+     
+        def tabPanel
+        builder.with {
+            tabPanel = panel {
+                borderLayout()
+                panel {
+                    label(text : model.host.getHumanReadableName(), constraints : BorderLayout.CENTER)
+                }
+                button(icon : imageIcon("/close_tab.png"), preferredSize : [20,20], constraints : BorderLayout.EAST, // TODO: in osx is probably WEST
+                    actionPerformed : closeTab )
             }
-        })
-        dialog.show()
+        }
+
+        parent.setTabComponentAt(index, tabPanel)
     }
     
     
@@ -216,5 +232,15 @@ class BrowseView {
         for (Integer i : rows)
             rv << model.results[i]
         rv
+    }
+    
+    def closeTab = {
+        def mainFrameGroup = application.mvcGroupManager.findGroup("MainFrame")
+        mainFrameGroup.model.browses.remove(model.host.getHumanReadableName())
+        
+        int index = parent.indexOfTab(model.host.getHumanReadableName())
+        parent.removeTabAt(index)
+        model.downloadActionEnabled = false
+        mvcGroup.destroy()
     }
 }

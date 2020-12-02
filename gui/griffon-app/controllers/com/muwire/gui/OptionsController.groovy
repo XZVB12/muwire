@@ -91,6 +91,10 @@ class OptionsController {
         boolean searchComments = view.searchCommentsCheckbox.model.isSelected()
         model.searchComments = searchComments
         settings.searchComments = searchComments
+        
+        boolean searchCollections = view.searchCollectionsCheckbox.model.isSelected()
+        model.searchCollections = searchCollections
+        settings.searchCollections = searchCollections
 
         boolean shareDownloaded = view.shareDownloadedCheckbox.model.isSelected()
         model.shareDownloadedFiles = shareDownloaded
@@ -177,6 +181,8 @@ class OptionsController {
         model.trustListInterval = trustListInterval
         settings.trustListInterval = Integer.parseInt(trustListInterval)
         
+        // chat settings
+        
         boolean startChatServer = view.startChatServerCheckbox.model.isSelected()
         model.startChatServer = startChatServer
         settings.startChatServer = startChatServer
@@ -195,7 +201,28 @@ class OptionsController {
         
         if (model.chatWelcomeFile != null)
             settings.chatWelcomeFile = new File(model.chatWelcomeFile)
-
+            
+        // messaging settings
+        
+        boolean allowMessages = view.allowMessagesCheckbox.model.isSelected()
+        model.allowMessages = allowMessages
+        settings.allowMessages = allowMessages
+        
+        boolean allowOnlyTrustedMessages = view.allowOnlyTrustedMessagesCheckbox.model.isSelected()
+        model.allowOnlyTrustedMessages = allowOnlyTrustedMessages
+        settings.allowOnlyTrustedMessages = allowOnlyTrustedMessages
+        
+        int messageSendInterval = Integer.parseInt(view.messageSendIntervalField.text)
+        model.messageSendInterval = messageSendInterval
+        settings.messageSendInterval = messageSendInterval
+        
+        if (view.messageNotificationsCheckbox != null) {
+            boolean messageNotifications = view.messageNotificationsCheckbox.model.isSelected()
+            model.messageNotifications = messageNotifications
+            uiSettings.messageNotifications = messageNotifications
+        }
+        
+        
         core.saveMuSettings()
 
         // UI Setttings
@@ -295,7 +322,7 @@ class OptionsController {
         }
         int rv = chooser.showOpenDialog(null)
         if (rv == JFileChooser.APPROVE_OPTION)
-            model.chatWelcomeFile = getSelectedFile().getAbsolutePath()
+            model.chatWelcomeFile = chooser.getSelectedFile().getAbsolutePath()
     }
     
     @ControllerAction
