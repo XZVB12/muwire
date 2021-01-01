@@ -4,14 +4,19 @@ import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JTable
 import javax.swing.table.DefaultTableCellRenderer
+import java.text.DecimalFormat
+import java.text.FieldPosition
+import java.text.Format
 
 import static com.muwire.gui.Translator.trans
 
-import net.i2p.data.DataHelper
-
 class SizeRenderer extends DefaultTableCellRenderer {
+    private final String bShort;
+    private final StringBuffer sb = new StringBuffer(32)
+
     SizeRenderer() {
         setHorizontalAlignment(JLabel.CENTER)
+        bShort = trans("BYTES_SHORT")
     }
     @Override
     JComponent getTableCellRendererComponent(JTable table, Object value,
@@ -21,8 +26,9 @@ class SizeRenderer extends DefaultTableCellRenderer {
             return super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
         }
         Long l = (Long) value
-        String formatted = DataHelper.formatSize2Decimal(l, false) + trans("BYTES_SHORT")
-        setText(formatted)
+        SizeFormatter.format(l,sb)
+        sb.append(bShort)
+        setText(sb.toString())
         if (isSelected) {
             setForeground(table.getSelectionForeground())
             setBackground(table.getSelectionBackground())
